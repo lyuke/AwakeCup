@@ -18,5 +18,9 @@ let package = Package(
                 .linkedFramework("ServiceManagement"),
             ]
         ),
+        .testTarget(
+            name: "AwakeCupTests",
+            dependencies: ["AwakeCup"]
+        ),
     ]
 )
