@@ -152,6 +152,7 @@ final class CaffeineManager: ObservableObject {
     @Published private(set) var isDisplayActive: Bool = false
     @Published private(set) var activeMode: Mode? = nil
     @Published private(set) var activeUntil: Date? = nil
+    @Published private(set) var activationStartTime: Date? = nil
 
     private var systemAssertionID: IOPMAssertionID = 0
     private var displayAssertionID: IOPMAssertionID = 0
@@ -179,6 +180,7 @@ final class CaffeineManager: ObservableObject {
         stopTimer?.invalidate()
         stopTimer = nil
         activeUntil = nil
+        activationStartTime = nil
 
         if isSystemActive {
             IOPMAssertionRelease(systemAssertionID)
@@ -247,6 +249,7 @@ final class CaffeineManager: ObservableObject {
 
         activeMode = (isSystemActive || isDisplayActive) ? mode : nil
         activeUntil = date
+        activationStartTime = date != nil ? Date() : nil
 
         if let date {
             let interval = max(0, date.timeIntervalSinceNow)
@@ -267,6 +270,209 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         CaffeineManager.shared.deactivate()
+    }
+}
+
+/// Pure configuration model for the menu bar icon appearance.
+/// Contains all information needed to render the icon: active state, mode, and countdown.
+struct MenuBarIconState: Equatable {
+    let isActive: Bool
+    let mode: Mode?
+    let activationStartTime: Date?
+    let activeUntil: Date?
+
+    enum Mode: Equatable {
+        case systemOnly
+        case displayOnly
+        case systemAndDisplay
+
+        enum BadgeStyle: Equatable {
+            case verticalBar
+            case dot
+            case doubleBar
+        }
+
+        var badgeStyle: BadgeStyle {
+            switch self {
+            case .systemOnly:
+                return .verticalBar
+            case .displayOnly:
+                return .dot
+            case .systemAndDisplay:
+                return .doubleBar
+            }
+        }
+    }
+
+    /// Returns the countdown progress as a value between 0.0 (just started) and 1.0 (full time remaining).
+    /// Returns nil when there is no countdown (indefinite mode or inactive).
+    var countdownProgress: Double? {
+        guard let start = activationStartTime,
+              let end = activeUntil,
+              isActive else { return nil }
+
+        let total = end.timeIntervalSince(start)
+        let remaining = end.timeIntervalSinceNow
+        guard total > 0 else { return nil }
+        return max(0.0, min(1.0, remaining / total))
+    }
+
+    /// Whether a countdown arc should be drawn.
+    var hasCountdown: Bool {
+        countdownProgress != nil
+    }
+
+    /// Build state from CaffeineManager values.
+    static func from(
+        isSystemActive: Bool,
+        isDisplayActive: Bool,
+        activeMode: CaffeineManager.Mode?,
+        activationStartTime: Date?,
+        activeUntil: Date?
+    ) -> MenuBarIconState {
+        guard isSystemActive || isDisplayActive else {
+            return MenuBarIconState(
+                isActive: false,
+                mode: nil,
+                activationStartTime: nil,
+                activeUntil: nil
+            )
+        }
+
+        let mode: Mode?
+        switch activeMode {
+        case .systemOnly:
+            mode = .systemOnly
+        case .displayOnly:
+            mode = .displayOnly
+        case .systemAndDisplay, .none:
+            mode = .systemAndDisplay
+        }
+
+        return MenuBarIconState(
+            isActive: true,
+            mode: mode,
+            activationStartTime: activationStartTime,
+            activeUntil: activeUntil
+        )
+    }
+}
+
+enum MenuBarIcon {
+    static let iconSize = CGSize(width: 18, height: 18)
+
+    /// Returns whether the icon should show active state (with badge).
+    static func isActive(isSystemActive: Bool, isDisplayActive: Bool) -> Bool {
+        isSystemActive || isDisplayActive
+    }
+
+    /// Composites a menu bar icon: cup SF Symbol with mode-specific badge and optional countdown arc.
+    static func makeImage(
+        isSystemActive: Bool,
+        isDisplayActive: Bool,
+        activeMode: CaffeineManager.Mode? = nil,
+        activationStartTime: Date? = nil,
+        activeUntil: Date? = nil
+    ) -> NSImage {
+        let state = MenuBarIconState.from(
+            isSystemActive: isSystemActive,
+            isDisplayActive: isDisplayActive,
+            activeMode: activeMode,
+            activationStartTime: activationStartTime,
+            activeUntil: activeUntil
+        )
+        return makeImage(state: state)
+    }
+
+    /// Renders the icon from a MenuBarIconState.
+    static func makeImage(state: MenuBarIconState) -> NSImage {
+        let size = iconSize
+        return NSImage(size: size, flipped: false) { rect in
+            let symbolName = state.isActive ? "cup.and.saucer.fill" : "cup.and.saucer"
+            guard let symbolBase = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil),
+                  let symbolImage = symbolBase.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size.height, weight: .regular))
+            else { return false }
+
+            let symbolRect = NSRect(origin: .zero, size: size)
+            symbolImage.draw(in: symbolRect, from: .zero, operation: .sourceOver, fraction: 1.0)
+
+            if state.isActive {
+                // Draw countdown arc first (behind badge), then mode badge on top.
+                if let progress = state.countdownProgress, progress > 0 {
+                    drawCountdownArc(in: rect, progress: progress, mode: state.mode)
+                }
+
+                // Draw mode-specific badge.
+                drawModeBadge(in: rect, mode: state.mode)
+            }
+
+            return true
+        }
+    }
+
+    // MARK: - Private Drawing Helpers
+
+    private static func drawCountdownArc(in rect: NSRect, progress: Double, mode: MenuBarIconState.Mode?) {
+        // Thin arc stroke that fills clockwise as time passes.
+        // Uses template-friendly neutral stroke color that survives monochrome rendering.
+        let strokeWidth: CGFloat = 1.5
+        let inset: CGFloat = strokeWidth / 2 + 0.5
+
+        let startAngle: CGFloat = 90  // top
+        let endAngle: CGFloat = 90 - 360 * CGFloat(progress)
+
+        let path = NSBezierPath()
+        path.appendArc(
+            withCenter: CGPoint(x: rect.midX, y: rect.midY),
+            radius: (rect.width - inset * 2) / 2,
+            startAngle: startAngle,
+            endAngle: endAngle,
+            clockwise: true
+        )
+        path.lineWidth = strokeWidth
+        path.lineCapStyle = .round
+
+        // Template-friendly: use `controlTextColor` which adapts to light/dark/monochrome menu bars.
+        NSColor.controlTextColor.withAlphaComponent(0.6).setStroke()
+        path.stroke()
+    }
+
+    private static func drawModeBadge(in rect: NSRect, mode: MenuBarIconState.Mode?) {
+        // Shape-based mode distinction that survives monochrome/template rendering.
+        let badgeOriginX = rect.width - rect.width * 0.22
+        let badgeOriginY = rect.height * 0.76
+
+        NSColor.controlTextColor.withAlphaComponent(0.85).setFill()
+
+        switch mode?.badgeStyle ?? .doubleBar {
+        case .verticalBar:
+            let barWidth: CGFloat = 2.0
+            let barHeight: CGFloat = 6.0
+            let barRect = NSRect(x: badgeOriginX, y: badgeOriginY, width: barWidth, height: barHeight)
+            NSBezierPath(roundedRect: barRect, xRadius: 0.5, yRadius: 0.5).fill()
+
+        case .dot:
+            let dotRadius: CGFloat = 2.0
+            let dotRect = NSRect(
+                x: badgeOriginX - dotRadius,
+                y: badgeOriginY + (6.0 - dotRadius * 2) / 2,
+                width: dotRadius * 2,
+                height: dotRadius * 2
+            )
+            NSBezierPath(ovalIn: dotRect).fill()
+
+        case .doubleBar:
+            let barWidth: CGFloat = 6.0
+            let barHeight: CGFloat = 2.0
+            let gap: CGFloat = 1.5
+            let barX = badgeOriginX - barWidth / 2
+            let topBarY = badgeOriginY + gap / 2
+            let bottomBarY = badgeOriginY - barHeight - gap / 2
+            let topRect = NSRect(x: barX, y: topBarY, width: barWidth, height: barHeight)
+            let bottomRect = NSRect(x: barX, y: bottomBarY, width: barWidth, height: barHeight)
+            NSBezierPath(roundedRect: topRect, xRadius: 0.5, yRadius: 0.5).fill()
+            NSBezierPath(roundedRect: bottomRect, xRadius: 0.5, yRadius: 0.5).fill()
+        }
     }
 }
 
@@ -304,6 +510,14 @@ private func modeStatusText(system: Bool, display: Bool) -> String {
     case (false, true): return "仅屏幕常亮（防锁屏）"
     case (false, false): return "未保持唤醒"
     }
+}
+
+private func menuBarHelpText(system: Bool, display: Bool, activeUntil: Date?) -> String {
+    let status = modeStatusText(system: system, display: display)
+    if let activeUntil {
+        return "AwakeCup：\(status)，将在 \(activeUntil.formatted(date: .omitted, time: .shortened)) 停止"
+    }
+    return "AwakeCup：\(status)"
 }
 
 @main
@@ -397,7 +611,18 @@ struct AwakeCupApp: App {
             .padding(12)
             .frame(minWidth: 220)
         } label: {
-            Image(systemName: (caffeine.isSystemActive || caffeine.isDisplayActive) ? "cup.and.saucer.fill" : "cup.and.saucer")
+            Image(nsImage: MenuBarIcon.makeImage(
+                isSystemActive: caffeine.isSystemActive,
+                isDisplayActive: caffeine.isDisplayActive,
+                activeMode: caffeine.activeMode,
+                activationStartTime: caffeine.activationStartTime,
+                activeUntil: caffeine.activeUntil
+            ))
+            .help(menuBarHelpText(
+                system: caffeine.isSystemActive,
+                display: caffeine.isDisplayActive,
+                activeUntil: caffeine.activeUntil
+            ))
         }
     }
 }
