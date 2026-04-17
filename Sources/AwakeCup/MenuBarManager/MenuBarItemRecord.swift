@@ -41,14 +41,9 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
             ?? snapshot.description?.nonEmpty
             ?? snapshot.bundleIdentifier
 
-        let manageability: MenuBarItemManageability
-        if snapshot.frame == nil {
-            manageability = .unmanaged(reason: "Missing frame")
-        } else if snapshot.actionNames.contains("AXPress") {
-            manageability = .manageable
-        } else {
-            manageability = .unmanaged(reason: "Missing AXPress action")
-        }
+        let manageability: MenuBarItemManageability = snapshot.actionNames.contains("AXPress")
+            ? .manageable
+            : .unmanaged(reason: "Missing AXPress action")
 
         let coarseX = Int(frame.minX.rounded())
         let coarseWidth = Int(frame.width.rounded())

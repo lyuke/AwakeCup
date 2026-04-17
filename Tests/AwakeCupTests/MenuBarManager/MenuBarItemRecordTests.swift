@@ -38,6 +38,40 @@ final class MenuBarItemRecordTests: XCTestCase {
         XCTAssertEqual(record.displayName, "VPN")
     }
 
+    func testRecordFallsBackToDescriptionWhenTitleIsEmpty() {
+        let snapshot = MenuBarItemSnapshot(
+            bundleIdentifier: "com.example.vpn",
+            processID: 77,
+            title: "",
+            description: "VPN",
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 150, y: 0, width: 18, height: 24),
+            actionNames: ["AXPress"]
+        )
+
+        let record = MenuBarItemRecord(snapshot: snapshot)
+
+        XCTAssertEqual(record.displayName, "VPN")
+    }
+
+    func testRecordFallsBackToBundleIdentifierWhenTitleAndDescriptionAreEmpty() {
+        let snapshot = MenuBarItemSnapshot(
+            bundleIdentifier: "com.example.fallback",
+            processID: 88,
+            title: "",
+            description: "",
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 160, y: 0, width: 18, height: 24),
+            actionNames: ["AXPress"]
+        )
+
+        let record = MenuBarItemRecord(snapshot: snapshot)
+
+        XCTAssertEqual(record.displayName, "com.example.fallback")
+    }
+
     func testRecordMarksMissingPressActionAsUnmanaged() {
         let snapshot = MenuBarItemSnapshot(
             bundleIdentifier: "com.example.readonly",
@@ -53,6 +87,23 @@ final class MenuBarItemRecordTests: XCTestCase {
         let record = MenuBarItemRecord(snapshot: snapshot)
 
         XCTAssertEqual(record.manageability, .unmanaged(reason: "Missing AXPress action"))
+    }
+
+    func testRecordIsStillManageableWhenFrameIsMissingButPressActionExists() {
+        let snapshot = MenuBarItemSnapshot(
+            bundleIdentifier: "com.example.framefree",
+            processID: 12,
+            title: "FrameFree",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: nil,
+            actionNames: ["AXPress"]
+        )
+
+        let record = MenuBarItemRecord(snapshot: snapshot)
+
+        XCTAssertEqual(record.manageability, .manageable)
     }
 
     func testStableIDChangesWhenBundleChanges() {
