@@ -1,17 +1,9 @@
 import Foundation
 import SwiftUI
 
-enum HiddenItemRevealMode: String, Codable, CaseIterable {
-    case panel
-    case expandedStrip
-}
-
 struct MenuBarLayoutConfiguration: Codable, Equatable {
     var assignments: [String: MenuBarItemSection] = [:]
     var orderBySection: [MenuBarItemSection: [String]] = [:]
-    var defaultRevealMode: HiddenItemRevealMode = .panel
-    var autoCollapseSeconds: TimeInterval = 8
-    var isEnabled: Bool = true
 }
 
 protocol MenuBarLayoutPersisting {
@@ -28,18 +20,6 @@ struct UserDefaultsLayoutPersistence: MenuBarLayoutPersisting {
 
     func saveData(_ data: Data, forKey key: String) {
         defaults.set(data, forKey: key)
-    }
-}
-
-final class InMemoryLayoutPersistence: MenuBarLayoutPersisting {
-    private var storage: [String: Data] = [:]
-
-    func loadData(forKey key: String) -> Data? {
-        storage[key]
-    }
-
-    func saveData(_ data: Data, forKey key: String) {
-        storage[key] = data
     }
 }
 
@@ -60,18 +40,13 @@ final class MenuBarLayoutStore: ObservableObject {
         }
     }
 
-    func assign(_ section: MenuBarItemSection, to itemID: String) {
-        configuration.assignments[itemID] = section
+    func assign(_ section: MenuBarItemSection, toPersistentID persistentID: String) {
+        configuration.assignments[persistentID] = section
         persist()
     }
 
-    func updateOrder(for section: MenuBarItemSection, ids: [String]) {
-        configuration.orderBySection[section] = ids
-        persist()
-    }
-
-    func setDefaultRevealMode(_ mode: HiddenItemRevealMode) {
-        configuration.defaultRevealMode = mode
+    func updateOrder(for section: MenuBarItemSection, persistentIDs: [String]) {
+        configuration.orderBySection[section] = persistentIDs
         persist()
     }
 
