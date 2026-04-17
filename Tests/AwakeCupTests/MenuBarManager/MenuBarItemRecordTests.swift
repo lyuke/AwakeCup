@@ -438,4 +438,60 @@ final class MenuBarItemRecordTests: XCTestCase {
         XCTAssertNotEqual(left.persistentID, right.persistentID)
         XCTAssertNotEqual(left.runtimeID, right.runtimeID)
     }
+
+    func testNilAndLiteralDashOptionalFieldsDoNotAliasPersistentID() {
+        let left = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.optional",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress"],
+            identityHint: nil
+        ))
+
+        let right = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.optional",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: "-",
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress"],
+            identityHint: "-"
+        ))
+
+        XCTAssertNotEqual(left.persistentID, right.persistentID)
+        XCTAssertNotEqual(left.runtimeID, right.runtimeID)
+    }
+
+    func testRuntimeIDHandlesCommaContainingActionNamesWithoutAliasing() {
+        let left = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.comma-actions",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress,AXShowMenu"]
+        ))
+
+        let right = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.comma-actions",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress", "AXShowMenu"]
+        ))
+
+        XCTAssertEqual(left.persistentID, right.persistentID)
+        XCTAssertNotEqual(left.runtimeID, right.runtimeID)
+    }
 }

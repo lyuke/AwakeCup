@@ -66,7 +66,8 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
         let displayName = snapshot.title?.nonEmpty
             ?? snapshot.description?.nonEmpty
             ?? snapshot.bundleIdentifier
-        let normalizedIdentityHint = snapshot.identityHint?.nonEmpty
+        let normalizedSubrole = OptionalIdentityString(snapshot.subrole?.nonEmpty)
+        let normalizedIdentityHint = OptionalIdentityString(snapshot.identityHint?.nonEmpty)
 
         let manageability: MenuBarItemManageability = snapshot.actionNames.contains("AXPress")
             ? .manageable
@@ -77,22 +78,28 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
         let coarseWidth = Int(frame.width.rounded())
         let coarseHeight = Int(frame.height.rounded())
 
-        self.persistentID = Self.encodeIdentityComponents([
-            snapshot.bundleIdentifier,
-            role,
-            snapshot.subrole ?? "-",
-            normalizedIdentityHint ?? "-",
-        ])
+        self.persistentID = Self.encodeIdentityComponents(
+            PersistentIdentityPayload(
+                bundleIdentifier: snapshot.bundleIdentifier,
+                role: role,
+                subrole: normalizedSubrole,
+                identityHint: normalizedIdentityHint
+            )
+        )
 
-        self.runtimeID = Self.encodeIdentityComponents([
-            persistentID,
-            displayName,
-            sortedActionNames.joined(separator: ","),
-            "\(coarseX)",
-            "\(coarseY)",
-            "\(coarseWidth)",
-            "\(coarseHeight)",
-        ])
+        self.runtimeID = Self.encodeIdentityComponents(
+            RuntimeIdentityPayload(
+                persistentID: persistentID,
+                displayName: displayName,
+                actionNames: sortedActionNames,
+                geometry: GeometryIdentity(
+                    x: coarseX,
+                    y: coarseY,
+                    width: coarseWidth,
+                    height: coarseHeight
+                )
+            )
+        )
 
         self.bundleIdentifier = snapshot.bundleIdentifier
         self.processID = snapshot.processID
@@ -104,8 +111,10 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
         self.manageability = manageability
     }
 
-    private static func encodeIdentityComponents(_ components: [String]) -> String {
-        let data = (try? JSONEncoder().encode(components)) ?? Data()
+    private static func encodeIdentityComponents<T: Encodable>(_ value: T) -> String {
+        guard let data = try? JSONEncoder().encode(value) else {
+            return ""
+        }
         return String(decoding: data, as: UTF8.self)
     }
 }
@@ -115,4 +124,33 @@ private extension String {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
+}
+
+private struct OptionalIdentityString: Codable, Equatable {
+    let value: String?
+
+    init(_ value: String?) {
+        self.value = value
+    }
+}
+
+private struct PersistentIdentityPayload: Codable, Equatable {
+    let bundleIdentifier: String
+    let role: String
+    let subrole: OptionalIdentityString
+    let identityHint: OptionalIdentityString
+}
+
+private struct GeometryIdentity: Codable, Equatable {
+    let x: Int
+    let y: Int
+    let width: Int
+    let height: Int
+}
+
+private struct RuntimeIdentityPayload: Codable, Equatable {
+    let persistentID: String
+    let displayName: String
+    let actionNames: [String]
+    let geometry: GeometryIdentity
 }
