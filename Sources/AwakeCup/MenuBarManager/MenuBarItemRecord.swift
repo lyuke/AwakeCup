@@ -20,6 +20,29 @@ struct MenuBarItemSnapshot: Equatable {
     let subrole: String?
     let frame: CGRect?
     let actionNames: [String]
+    let identityHint: String?
+
+    init(
+        bundleIdentifier: String,
+        processID: Int32,
+        title: String?,
+        description: String?,
+        role: String?,
+        subrole: String?,
+        frame: CGRect?,
+        actionNames: [String],
+        identityHint: String? = nil
+    ) {
+        self.bundleIdentifier = bundleIdentifier
+        self.processID = processID
+        self.title = title
+        self.description = description
+        self.role = role
+        self.subrole = subrole
+        self.frame = frame
+        self.actionNames = actionNames
+        self.identityHint = identityHint
+    }
 }
 
 struct MenuBarItemRecord: Identifiable, Codable, Equatable {
@@ -58,6 +81,7 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
             role,
             snapshot.subrole ?? "-",
             sortedActionNames.joined(separator: ","),
+            snapshot.identityHint ?? "-",
         ].joined(separator: "|")
 
         self.runtimeID = [
@@ -82,6 +106,7 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
 
 private extension String {
     var nonEmpty: String? {
-        isEmpty ? nil : self
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
