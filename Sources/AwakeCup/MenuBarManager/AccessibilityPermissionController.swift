@@ -15,21 +15,6 @@ struct LiveAccessibilityTrustChecker: AccessibilityTrustChecking {
     }
 }
 
-final class StubAccessibilityTrustChecker: AccessibilityTrustChecking {
-    private var responses: [Bool]
-    private(set) var promptCalls: Int = 0
-
-    init(responses: [Bool]) {
-        self.responses = responses
-    }
-
-    func isTrusted(prompt: Bool) -> Bool {
-        if prompt { promptCalls += 1 }
-        if responses.isEmpty { return false }
-        return responses.removeFirst()
-    }
-}
-
 @MainActor
 final class AccessibilityPermissionController: ObservableObject {
     enum State: Equatable {
@@ -46,6 +31,7 @@ final class AccessibilityPermissionController: ObservableObject {
 
     init(checker: AccessibilityTrustChecking = LiveAccessibilityTrustChecker()) {
         self.checker = checker
+        state = checker.isTrusted(prompt: false) ? .granted : .denied
     }
 
     func refresh() {
