@@ -524,7 +524,6 @@ struct CustomDurationEntry: Codable, Equatable, Identifiable {
 }
 
 private enum DurationOption: Identifiable, CaseIterable {
-    case fiveMinutes
     case oneHour
     case twoHours
     case indefinite
@@ -533,7 +532,6 @@ private enum DurationOption: Identifiable, CaseIterable {
 
     var title: String {
         switch self {
-        case .fiveMinutes: return "5 分钟"
         case .oneHour: return "1 小时"
         case .twoHours: return "2 小时"
         case .indefinite: return "一直保持"
@@ -542,7 +540,6 @@ private enum DurationOption: Identifiable, CaseIterable {
 
     var seconds: TimeInterval? {
         switch self {
-        case .fiveMinutes: return 5 * 60
         case .oneHour: return 60 * 60
         case .twoHours: return 2 * 60 * 60
         case .indefinite: return nil
