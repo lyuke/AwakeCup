@@ -476,6 +476,53 @@ enum MenuBarIcon {
     }
 }
 
+struct CustomDurationEntry: Codable, Equatable, Identifiable {
+    let value: Int
+    let unit: Unit
+
+    enum Unit: String, Codable, CaseIterable, Identifiable {
+        case minutes
+        case hours
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .minutes: return "分钟"
+            case .hours: return "小时"
+            }
+        }
+
+        var maxValue: Int {
+            switch self {
+            case .minutes: return 1440  // 24 hours
+            case .hours: return 24
+            }
+        }
+
+        var secondsPerUnit: Int {
+            switch self {
+            case .minutes: return 60
+            case .hours: return 3600
+            }
+        }
+    }
+
+    var id: String { "\(value)-\(unit.rawValue)" }
+
+    var seconds: TimeInterval {
+        TimeInterval(value * unit.secondsPerUnit)
+    }
+
+    var displayTitle: String {
+        "\(value) \(unit.displayName)"
+    }
+
+    var isValid: Bool {
+        value >= 1 && value <= unit.maxValue
+    }
+}
+
 private enum DurationOption: Identifiable, CaseIterable {
     case fiveMinutes
     case oneHour
