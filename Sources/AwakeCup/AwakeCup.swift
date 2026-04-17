@@ -675,6 +675,58 @@ struct AwakeCupApp: App {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                // Custom duration input
+                HStack(spacing: 4) {
+                    TextField("30", text: $customDurationValue)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 50)
+                        .onChange(of: customDurationValue) { newValue in
+                            let filtered = newValue.filter { $0.isNumber }
+                            if filtered != newValue {
+                                customDurationValue = filtered
+                            }
+                        }
+
+                    Picker("", selection: $customDurationUnit) {
+                        ForEach(CustomDurationEntry.Unit.allCases) { unit in
+                            Text(unit.displayName).tag(unit)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 60)
+
+                    Button("开始") {
+                        activateCustom()
+                    }
+                    .disabled(!canActivateCustom)
+                    .buttonStyle(.bordered)
+                }
+
+                // History row
+                if !history.isEmpty {
+                    HStack(spacing: 2) {
+                        Text("最近：")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(history) { entry in
+                            Button(entry.displayTitle) {
+                                activateFromHistory(entry)
+                            }
+                            .font(.caption)
+                            .buttonStyle(.link)
+                            if entry.id != history.last?.id {
+                                Text("·")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                Divider()
+
+                // Fixed duration options
                 ForEach(DurationOption.allCases) { option in
                     Button(option.title) {
                         if let seconds = option.seconds {
