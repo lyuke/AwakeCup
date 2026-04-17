@@ -1,5 +1,5 @@
 import Foundation
-import SwiftUI
+import Combine
 
 struct MenuBarLayoutConfiguration: Codable, Equatable {
     var assignments: [String: MenuBarItemSection] = [:]

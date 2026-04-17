@@ -25,7 +25,7 @@ final class CorruptLayoutPersistence: MenuBarLayoutPersisting {
 
 @MainActor
 final class MenuBarLayoutStoreTests: XCTestCase {
-    func testAssignStoresSectionAndRevealsItOnReload() {
+    func testAssignUsesPersistentIDAndRevealsItOnReload() {
         let persistence = InMemoryLayoutPersistence()
         let record = MenuBarItemRecord(snapshot: .init(bundleIdentifier: "com.example.clock", processID: 1, title: "Clock", description: nil, role: "AXMenuBarItem", subrole: nil, frame: CGRect(x: 10, y: 0, width: 20, height: 24), actionNames: ["AXPress"]))
         let firstStore = MenuBarLayoutStore(persistence: persistence)
@@ -34,6 +34,24 @@ final class MenuBarLayoutStoreTests: XCTestCase {
         let secondStore = MenuBarLayoutStore(persistence: persistence)
 
         XCTAssertEqual(secondStore.configuration.assignments[record.persistentID], .hidden)
+    }
+
+    func testPersistedLayoutUsesPersistentIDAcrossRuntimeChanges() {
+        let persistence = InMemoryLayoutPersistence()
+        let store = MenuBarLayoutStore(persistence: persistence)
+        let recordA = MenuBarItemRecord(snapshot: .init(bundleIdentifier: "com.example.clock", processID: 1, title: "Clock", description: nil, role: "AXMenuBarItem", subrole: nil, frame: CGRect(x: 10, y: 0, width: 20, height: 24), actionNames: ["AXPress"]))
+        let recordB = MenuBarItemRecord(snapshot: .init(bundleIdentifier: "com.example.clock", processID: 2, title: "Timer", description: nil, role: "AXMenuBarItem", subrole: nil, frame: CGRect(x: 200, y: 0, width: 30, height: 24), actionNames: ["AXPress", "AXShowMenu"]))
+
+        XCTAssertEqual(recordA.persistentID, recordB.persistentID)
+        XCTAssertNotEqual(recordA.runtimeID, recordB.runtimeID)
+
+        store.assign(.hidden, toPersistentID: recordA.persistentID)
+        store.updateOrder(for: .hidden, persistentIDs: [recordA.persistentID])
+
+        let reloadedStore = MenuBarLayoutStore(persistence: persistence)
+
+        XCTAssertEqual(reloadedStore.section(for: recordB), .hidden)
+        XCTAssertEqual(reloadedStore.orderedItems(inventory: [recordB], section: .hidden).map(\.displayName), ["Timer"])
     }
 
     func testOrderedItemsRespectsSavedOrderWithinSection() {
