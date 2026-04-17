@@ -132,7 +132,7 @@ final class MenuBarItemRecordTests: XCTestCase {
             actionNames: ["AXPress"]
         ))
 
-        XCTAssertNotEqual(left.id, right.id)
+        XCTAssertNotEqual(left.persistentID, right.persistentID)
     }
 }
 ```
@@ -171,7 +171,8 @@ struct MenuBarItemSnapshot: Equatable {
 }
 
 struct MenuBarItemRecord: Identifiable, Codable, Equatable {
-    let id: String
+    let persistentID: String
+    let runtimeID: String
     let bundleIdentifier: String
     let processID: Int32
     let displayName: String
@@ -181,33 +182,38 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
     let actionNames: [String]
     let manageability: MenuBarItemManageability
 
+    var id: String { runtimeID }
+
     init(snapshot: MenuBarItemSnapshot) {
         let role = snapshot.role ?? "AXUnknown"
         let frame = snapshot.frame ?? .zero
+        let sortedActionNames = snapshot.actionNames.sorted()
         let displayName = snapshot.title?.nonEmpty
             ?? snapshot.description?.nonEmpty
             ?? snapshot.bundleIdentifier
 
-        let manageability: MenuBarItemManageability
-        if snapshot.frame == nil {
-            manageability = .unmanaged(reason: "Missing frame")
-        } else if snapshot.actionNames.contains("AXPress") {
-            manageability = .manageable
-        } else {
-            manageability = .unmanaged(reason: "Missing AXPress action")
-        }
+        let manageability: MenuBarItemManageability = snapshot.actionNames.contains("AXPress")
+            ? .manageable
+            : .unmanaged(reason: "Missing AXPress action")
 
         let coarseX = Int(frame.minX.rounded())
+        let coarseY = Int(frame.minY.rounded())
         let coarseWidth = Int(frame.width.rounded())
+        let coarseHeight = Int(frame.height.rounded())
 
-        self.id = [
+        self.persistentID = [
             snapshot.bundleIdentifier,
             role,
             snapshot.subrole ?? "-",
+        ].joined(separator: "|")
+        self.runtimeID = [
+            persistentID,
             displayName,
-            snapshot.actionNames.sorted().joined(separator: ","),
+            sortedActionNames.joined(separator: ","),
             "\(coarseX)",
+            "\(coarseY)",
             "\(coarseWidth)",
+            "\(coarseHeight)",
         ].joined(separator: "|")
         self.bundleIdentifier = snapshot.bundleIdentifier
         self.processID = snapshot.processID
@@ -215,7 +221,7 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
         self.axRole = role
         self.axSubrole = snapshot.subrole
         self.frame = frame
-        self.actionNames = snapshot.actionNames.sorted()
+        self.actionNames = sortedActionNames
         self.manageability = manageability
     }
 }
@@ -382,7 +388,7 @@ final class MenuBarLayoutStore: ObservableObject {
     }
 
     func section(for item: MenuBarItemRecord) -> MenuBarItemSection {
-        configuration.assignments[item.id] ?? .alwaysVisible
+        configuration.assignments[item.persistentID] ?? .alwaysVisible
     }
 
     func orderedItems(inventory: [MenuBarItemRecord], section: MenuBarItemSection) -> [MenuBarItemRecord] {
@@ -390,8 +396,8 @@ final class MenuBarLayoutStore: ObservableObject {
         let order = configuration.orderBySection[section] ?? []
 
         return records.sorted { left, right in
-            let leftIndex = order.firstIndex(of: left.id) ?? .max
-            let rightIndex = order.firstIndex(of: right.id) ?? .max
+            let leftIndex = order.firstIndex(of: left.persistentID) ?? .max
+            let rightIndex = order.firstIndex(of: right.persistentID) ?? .max
             if leftIndex != rightIndex { return leftIndex < rightIndex }
             return left.frame.minX < right.frame.minX
         }
@@ -1066,8 +1072,8 @@ final class MenuBarManagerViewModelTests: XCTestCase {
         let overlay = StubMenuBarOverlayController()
         let viewModel = MenuBarManagerViewModel(permission: permission, inventory: inventory, layout: layout, presentation: presentation, overlay: overlay)
 
-        layout.assign(.alwaysVisible, to: MenuBarItemRecord(snapshot: .init(bundleIdentifier: "a", processID: 1, title: "Visible", description: nil, role: "AXMenuBarItem", subrole: nil, frame: CGRect(x: 10, y: 0, width: 20, height: 24), actionNames: ["AXPress"])).id)
-        layout.assign(.hidden, to: MenuBarItemRecord(snapshot: .init(bundleIdentifier: "b", processID: 2, title: "Hidden", description: nil, role: "AXMenuBarItem", subrole: nil, frame: CGRect(x: 40, y: 0, width: 20, height: 24), actionNames: ["AXPress"])).id)
+        layout.assign(.alwaysVisible, to: MenuBarItemRecord(snapshot: .init(bundleIdentifier: "a", processID: 1, title: "Visible", description: nil, role: "AXMenuBarItem", subrole: nil, frame: CGRect(x: 10, y: 0, width: 20, height: 24), actionNames: ["AXPress"])).persistentID)
+        layout.assign(.hidden, to: MenuBarItemRecord(snapshot: .init(bundleIdentifier: "b", processID: 2, title: "Hidden", description: nil, role: "AXMenuBarItem", subrole: nil, frame: CGRect(x: 40, y: 0, width: 20, height: 24), actionNames: ["AXPress"])).persistentID)
 
         viewModel.refresh()
 
@@ -1100,7 +1106,7 @@ final class MenuBarManagerViewModelTests: XCTestCase {
         let overlay = StubMenuBarOverlayController()
         let viewModel = MenuBarManagerViewModel(permission: permission, inventory: inventory, layout: layout, presentation: presentation, overlay: overlay)
         let hiddenRecord = MenuBarItemRecord(snapshot: .init(bundleIdentifier: "b", processID: 2, title: "Hidden", description: nil, role: "AXMenuBarItem", subrole: nil, frame: CGRect(x: 40, y: 0, width: 20, height: 24), actionNames: ["AXPress"]))
-        layout.assign(.hidden, to: hiddenRecord.id)
+        layout.assign(.hidden, to: hiddenRecord.persistentID)
 
         viewModel.refresh()
         viewModel.showHiddenItems()
@@ -1180,7 +1186,7 @@ final class MenuBarManagerViewModel: ObservableObject {
     }
 
     func move(_ item: MenuBarItemRecord, to section: MenuBarItemSection) {
-        layout.assign(section, to: item.id)
+        layout.assign(section, to: item.persistentID)
         refresh()
     }
 
