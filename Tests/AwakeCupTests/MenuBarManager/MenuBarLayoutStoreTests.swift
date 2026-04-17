@@ -39,19 +39,65 @@ final class MenuBarLayoutStoreTests: XCTestCase {
     func testPersistedLayoutUsesPersistentIDAcrossRuntimeChanges() {
         let persistence = InMemoryLayoutPersistence()
         let store = MenuBarLayoutStore(persistence: persistence)
-        let recordA = MenuBarItemRecord(snapshot: .init(bundleIdentifier: "com.example.clock", processID: 1, title: "Clock", description: nil, role: "AXMenuBarItem", subrole: nil, frame: CGRect(x: 10, y: 0, width: 20, height: 24), actionNames: ["AXPress"]))
-        let recordB = MenuBarItemRecord(snapshot: .init(bundleIdentifier: "com.example.clock", processID: 2, title: "Timer", description: nil, role: "AXMenuBarItem", subrole: nil, frame: CGRect(x: 200, y: 0, width: 30, height: 24), actionNames: ["AXPress", "AXShowMenu"]))
 
-        XCTAssertEqual(recordA.persistentID, recordB.persistentID)
-        XCTAssertNotEqual(recordA.runtimeID, recordB.runtimeID)
+        let recordA = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.alpha",
+            processID: 1,
+            title: "Alpha",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 220, y: 0, width: 20, height: 24),
+            actionNames: ["AXPress"]
+        ))
+        let recordB = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.beta",
+            processID: 2,
+            title: "Beta",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 40, y: 0, width: 20, height: 24),
+            actionNames: ["AXPress"]
+        ))
+
+        let recordAPrime = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.alpha",
+            processID: 11,
+            title: "Alpha Prime",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 40, y: 0, width: 20, height: 24),
+            actionNames: ["AXPress", "AXShowMenu"]
+        ))
+        let recordBPrime = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.beta",
+            processID: 22,
+            title: "Beta Prime",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 220, y: 0, width: 20, height: 24),
+            actionNames: ["AXPress", "AXShowMenu"]
+        ))
+
+        XCTAssertEqual(recordA.persistentID, recordAPrime.persistentID)
+        XCTAssertEqual(recordB.persistentID, recordBPrime.persistentID)
+        XCTAssertNotEqual(recordA.runtimeID, recordAPrime.runtimeID)
+        XCTAssertNotEqual(recordB.runtimeID, recordBPrime.runtimeID)
 
         store.assign(.hidden, toPersistentID: recordA.persistentID)
-        store.updateOrder(for: .hidden, persistentIDs: [recordA.persistentID])
+        store.assign(.hidden, toPersistentID: recordB.persistentID)
+        store.updateOrder(for: .hidden, persistentIDs: [recordA.persistentID, recordB.persistentID])
 
         let reloadedStore = MenuBarLayoutStore(persistence: persistence)
+        let inventory = [recordAPrime, recordBPrime]
 
-        XCTAssertEqual(reloadedStore.section(for: recordB), .hidden)
-        XCTAssertEqual(reloadedStore.orderedItems(inventory: [recordB], section: .hidden).map(\.displayName), ["Timer"])
+        XCTAssertEqual(reloadedStore.section(for: recordAPrime), .hidden)
+        XCTAssertEqual(reloadedStore.section(for: recordBPrime), .hidden)
+        XCTAssertEqual(reloadedStore.configuration.orderBySection[.hidden], [recordA.persistentID, recordB.persistentID])
+        XCTAssertEqual(reloadedStore.orderedItems(inventory: inventory, section: .hidden).map(\.displayName), ["Alpha Prime", "Beta Prime"])
     }
 
     func testOrderedItemsRespectsSavedOrderWithinSection() {
