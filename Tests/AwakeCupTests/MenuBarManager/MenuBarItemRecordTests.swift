@@ -106,7 +106,7 @@ final class MenuBarItemRecordTests: XCTestCase {
         XCTAssertEqual(record.manageability, .manageable)
     }
 
-    func testStableIDChangesWhenBundleChanges() {
+    func testPersistentIDChangesWhenBundleChanges() {
         let left = MenuBarItemRecord(snapshot: .init(
             bundleIdentifier: "com.example.first",
             processID: 1,
@@ -129,10 +129,10 @@ final class MenuBarItemRecordTests: XCTestCase {
             actionNames: ["AXPress"]
         ))
 
-        XCTAssertNotEqual(left.id, right.id)
+        XCTAssertNotEqual(left.persistentID, right.persistentID)
     }
 
-    func testStableIDIgnoresTitleAndDescriptionChanges() {
+    func testPersistentIDIgnoresTitleAndDescriptionChanges() {
         let left = MenuBarItemRecord(snapshot: .init(
             bundleIdentifier: "com.example.stable",
             processID: 1,
@@ -155,10 +155,10 @@ final class MenuBarItemRecordTests: XCTestCase {
             actionNames: ["AXPress"]
         ))
 
-        XCTAssertEqual(left.id, right.id)
+        XCTAssertEqual(left.persistentID, right.persistentID)
     }
 
-    func testStableIDIgnoresActionNameOrdering() {
+    func testPersistentIDIgnoresActionNameOrdering() {
         let left = MenuBarItemRecord(snapshot: .init(
             bundleIdentifier: "com.example.ordering",
             processID: 1,
@@ -181,6 +181,84 @@ final class MenuBarItemRecordTests: XCTestCase {
             actionNames: ["AXPress", "AXShowMenu"]
         ))
 
-        XCTAssertEqual(left.id, right.id)
+        XCTAssertEqual(left.persistentID, right.persistentID)
+    }
+
+    func testPersistentIDIgnoresFrameChanges() {
+        let left = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.geometry",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress"]
+        ))
+
+        let right = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.geometry",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 220, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress"]
+        ))
+
+        XCTAssertEqual(left.persistentID, right.persistentID)
+    }
+
+    func testRuntimeIDChangesWhenFrameChanges() {
+        let left = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.runtime",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress"]
+        ))
+
+        let right = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.runtime",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 220, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress"]
+        ))
+
+        XCTAssertNotEqual(left.runtimeID, right.runtimeID)
+    }
+
+    func testRuntimeIDDiffersForMissingFrameLabels() {
+        let left = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.no-frame",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: nil,
+            actionNames: ["AXPress"]
+        ))
+
+        let right = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.no-frame",
+            processID: 1,
+            title: "Timer",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: nil,
+            actionNames: ["AXPress"]
+        ))
+
+        XCTAssertNotEqual(left.runtimeID, right.runtimeID)
     }
 }

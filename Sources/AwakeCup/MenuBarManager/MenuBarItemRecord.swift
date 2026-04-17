@@ -23,7 +23,8 @@ struct MenuBarItemSnapshot: Equatable {
 }
 
 struct MenuBarItemRecord: Identifiable, Codable, Equatable {
-    let id: String
+    let persistentID: String
+    let runtimeID: String
     let bundleIdentifier: String
     let processID: Int32
     let displayName: String
@@ -32,6 +33,8 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
     let frame: CGRect
     let actionNames: [String]
     let manageability: MenuBarItemManageability
+
+    var id: String { runtimeID }
 
     init(snapshot: MenuBarItemSnapshot) {
         let role = snapshot.role ?? "AXUnknown"
@@ -46,16 +49,26 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
             : .unmanaged(reason: "Missing AXPress action")
 
         let coarseX = Int(frame.minX.rounded())
+        let coarseY = Int(frame.minY.rounded())
         let coarseWidth = Int(frame.width.rounded())
+        let coarseHeight = Int(frame.height.rounded())
 
-        self.id = [
+        self.persistentID = [
             snapshot.bundleIdentifier,
             role,
             snapshot.subrole ?? "-",
             sortedActionNames.joined(separator: ","),
-            "\(coarseX)",
-            "\(coarseWidth)",
         ].joined(separator: "|")
+
+        self.runtimeID = [
+            persistentID,
+            displayName,
+            "\(coarseX)",
+            "\(coarseY)",
+            "\(coarseWidth)",
+            "\(coarseHeight)",
+        ].joined(separator: "|")
+
         self.bundleIdentifier = snapshot.bundleIdentifier
         self.processID = snapshot.processID
         self.displayName = displayName
