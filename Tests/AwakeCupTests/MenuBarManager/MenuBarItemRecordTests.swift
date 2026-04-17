@@ -227,6 +227,33 @@ final class MenuBarItemRecordTests: XCTestCase {
         XCTAssertEqual(left.persistentID, right.persistentID)
     }
 
+    func testRuntimeIDChangesWhenActionSetChanges() {
+        let left = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.actions.runtime",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress", "AXShowMenu"]
+        ))
+
+        let right = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.actions.runtime",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress"]
+        ))
+
+        XCTAssertEqual(left.persistentID, right.persistentID)
+        XCTAssertNotEqual(left.runtimeID, right.runtimeID)
+    }
+
     func testPersistentIDIgnoresFrameChanges() {
         let left = MenuBarItemRecord(snapshot: .init(
             bundleIdentifier: "com.example.geometry",
@@ -276,6 +303,35 @@ final class MenuBarItemRecordTests: XCTestCase {
             actionNames: ["AXPress"]
         ))
 
+        XCTAssertNotEqual(left.runtimeID, right.runtimeID)
+    }
+
+    func testDelimitedFieldsDoNotAliasIdentity() {
+        let left = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example|one",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress"],
+            identityHint: "hint"
+        ))
+
+        let right = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem|one",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress"],
+            identityHint: "hint"
+        ))
+
+        XCTAssertNotEqual(left.persistentID, right.persistentID)
         XCTAssertNotEqual(left.runtimeID, right.runtimeID)
     }
 

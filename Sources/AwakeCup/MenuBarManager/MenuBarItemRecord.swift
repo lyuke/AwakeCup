@@ -77,14 +77,14 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
         let coarseWidth = Int(frame.width.rounded())
         let coarseHeight = Int(frame.height.rounded())
 
-        self.persistentID = [
+        self.persistentID = Self.encodeIdentityComponents([
             snapshot.bundleIdentifier,
             role,
             snapshot.subrole ?? "-",
             normalizedIdentityHint ?? "-",
-        ].joined(separator: "|")
+        ])
 
-        self.runtimeID = [
+        self.runtimeID = Self.encodeIdentityComponents([
             persistentID,
             displayName,
             sortedActionNames.joined(separator: ","),
@@ -92,7 +92,7 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
             "\(coarseY)",
             "\(coarseWidth)",
             "\(coarseHeight)",
-        ].joined(separator: "|")
+        ])
 
         self.bundleIdentifier = snapshot.bundleIdentifier
         self.processID = snapshot.processID
@@ -102,6 +102,11 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
         self.frame = frame
         self.actionNames = sortedActionNames
         self.manageability = manageability
+    }
+
+    private static func encodeIdentityComponents(_ components: [String]) -> String {
+        let data = (try? JSONEncoder().encode(components)) ?? Data()
+        return String(decoding: data, as: UTF8.self)
     }
 }
 
