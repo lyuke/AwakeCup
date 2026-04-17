@@ -66,6 +66,7 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
         let displayName = snapshot.title?.nonEmpty
             ?? snapshot.description?.nonEmpty
             ?? snapshot.bundleIdentifier
+        let normalizedIdentityHint = snapshot.identityHint?.nonEmpty
 
         let manageability: MenuBarItemManageability = snapshot.actionNames.contains("AXPress")
             ? .manageable
@@ -80,13 +81,13 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
             snapshot.bundleIdentifier,
             role,
             snapshot.subrole ?? "-",
-            sortedActionNames.joined(separator: ","),
-            snapshot.identityHint ?? "-",
+            normalizedIdentityHint ?? "-",
         ].joined(separator: "|")
 
         self.runtimeID = [
             persistentID,
             displayName,
+            sortedActionNames.joined(separator: ","),
             "\(coarseX)",
             "\(coarseY)",
             "\(coarseWidth)",

@@ -201,6 +201,32 @@ final class MenuBarItemRecordTests: XCTestCase {
         XCTAssertEqual(left.persistentID, right.persistentID)
     }
 
+    func testPersistentIDIgnoresActionSetChanges() {
+        let left = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.actions",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress", "AXShowMenu"]
+        ))
+
+        let right = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.actions",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress"]
+        ))
+
+        XCTAssertEqual(left.persistentID, right.persistentID)
+    }
+
     func testPersistentIDIgnoresFrameChanges() {
         let left = MenuBarItemRecord(snapshot: .init(
             bundleIdentifier: "com.example.geometry",
@@ -251,6 +277,55 @@ final class MenuBarItemRecordTests: XCTestCase {
         ))
 
         XCTAssertNotEqual(left.runtimeID, right.runtimeID)
+    }
+
+    func testWhitespaceOnlyIdentityHintBehavesLikeNoHint() {
+        let left = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.hint",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress"],
+            identityHint: nil
+        ))
+
+        let right = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.hint",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress"],
+            identityHint: "   "
+        ))
+
+        XCTAssertEqual(left.persistentID, right.persistentID)
+    }
+
+    func testRecordCodableRoundTripPreservesIdentities() throws {
+        let original = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.codable",
+            processID: 7,
+            title: "Clock",
+            description: "Menu Bar Clock",
+            role: "AXMenuBarItem",
+            subrole: "AXStatusItem",
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress", "AXShowMenu"],
+            identityHint: "primary"
+        ))
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(MenuBarItemRecord.self, from: data)
+
+        XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.persistentID, original.persistentID)
+        XCTAssertEqual(decoded.runtimeID, original.runtimeID)
     }
 
     func testRuntimeIDDiffersForMissingFrameLabels() {
