@@ -572,6 +572,45 @@ struct AwakeCupApp: App {
     @State private var selectedMode: CaffeineManager.Mode = .systemAndDisplay
     @AppStorage("launchAtLogin") private var launchAtLogin: Bool = false
     @State private var isApplyingLaunchAtLogin: Bool = false
+    @State private var customDurationValue: String = ""
+    @State private var customDurationUnit: CustomDurationEntry.Unit = .minutes
+    @AppStorage("customDurationHistory") private var historyData: Data = Data()
+
+    private var history: [CustomDurationEntry] {
+        (try? JSONDecoder().decode([CustomDurationEntry].self, from: historyData)) ?? []
+    }
+
+    private var canActivateCustom: Bool {
+        guard !customDurationValue.isEmpty,
+              let intValue = Int(customDurationValue),
+              intValue >= 1,
+              intValue <= customDurationUnit.maxValue else { return false }
+        return true
+    }
+
+    private func activateCustom() {
+        guard let intValue = Int(customDurationValue),
+              intValue >= 1,
+              intValue <= customDurationUnit.maxValue else { return }
+
+        let entry = CustomDurationEntry(value: intValue, unit: customDurationUnit)
+
+        // Update history
+        var updated = history.filter { $0 != entry }
+        updated.insert(entry, at: 0)
+        if updated.count > 3 { updated = Array(updated.prefix(3)) }
+        historyData = (try? JSONEncoder().encode(updated)) ?? Data()
+
+        // Activate
+        caffeine.activate(mode: selectedMode, for: entry.seconds)
+    }
+
+    private func activateFromHistory(_ entry: CustomDurationEntry) {
+        // Cap at max if needed
+        let cappedValue = min(entry.value, entry.unit.maxValue)
+        let safeEntry = CustomDurationEntry(value: cappedValue, unit: entry.unit)
+        caffeine.activate(mode: selectedMode, for: safeEntry.seconds)
+    }
 
     var body: some Scene {
         MenuBarExtra {
