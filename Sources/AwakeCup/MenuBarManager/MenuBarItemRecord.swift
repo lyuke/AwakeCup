@@ -52,7 +52,6 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
             snapshot.bundleIdentifier,
             role,
             snapshot.subrole ?? "-",
-            displayName,
             sortedActionNames.joined(separator: ","),
             "\(coarseX)",
             "\(coarseWidth)",

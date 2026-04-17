@@ -131,4 +131,56 @@ final class MenuBarItemRecordTests: XCTestCase {
 
         XCTAssertNotEqual(left.id, right.id)
     }
+
+    func testStableIDIgnoresTitleAndDescriptionChanges() {
+        let left = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.stable",
+            processID: 1,
+            title: "Clock",
+            description: "Menu Bar Clock",
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress"]
+        ))
+
+        let right = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.stable",
+            processID: 1,
+            title: "Timer",
+            description: "Timer Menu Bar Item",
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress"]
+        ))
+
+        XCTAssertEqual(left.id, right.id)
+    }
+
+    func testStableIDIgnoresActionNameOrdering() {
+        let left = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.ordering",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXShowMenu", "AXPress"]
+        ))
+
+        let right = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.ordering",
+            processID: 1,
+            title: "Clock",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress", "AXShowMenu"]
+        ))
+
+        XCTAssertEqual(left.id, right.id)
+    }
 }
