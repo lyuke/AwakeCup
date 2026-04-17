@@ -1,0 +1,216 @@
+@preconcurrency import ApplicationServices
+import AppKit
+import Foundation
+
+enum MenuBarAXClientError: LocalizedError, Equatable {
+    case permissionDenied
+    case itemNotFound(String)
+    case pressFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .permissionDenied:
+            return "Accessibility permission is required."
+        case .itemNotFound(let runtimeID):
+            return "Menu bar item \(runtimeID) is no longer available."
+        case .pressFailed(let runtimeID):
+            return "Unable to press menu bar item \(runtimeID)."
+        }
+    }
+}
+
+@MainActor
+protocol MenuBarAXReading: AnyObject {
+    func fetchSnapshots() throws -> [MenuBarItemSnapshot]
+    func press(_ runtimeID: String) throws
+    func startObserving(processIDs: Set<Int32>, onChange: @escaping () -> Void)
+    func stopObserving()
+}
+
+@MainActor
+final class MenuBarAXClient: MenuBarAXReading {
+    private struct Observation {
+        let observer: AXObserver
+        let source: CFRunLoopSource
+        let callbackToken: Unmanaged<ObservationCallbackBox>
+    }
+
+    private static let extrasMenuBarAttribute = "AXExtrasMenuBar" as CFString
+    private static let observerCallback: AXObserverCallback = { _, _, _, refcon in
+        guard let refcon else { return }
+        let box = Unmanaged<ObservationCallbackBox>.fromOpaque(refcon).takeUnretainedValue()
+        box.invoke()
+    }
+
+    private var observations: [Int32: Observation] = [:]
+    private var elementsByRuntimeID: [String: AXUIElement] = [:]
+
+    func fetchSnapshots() throws -> [MenuBarItemSnapshot] {
+        guard AXIsProcessTrusted() else {
+            throw MenuBarAXClientError.permissionDenied
+        }
+
+        elementsByRuntimeID.removeAll(keepingCapacity: true)
+
+        var snapshots: [MenuBarItemSnapshot] = []
+        for application in NSWorkspace.shared.runningApplications where application.processIdentifier > 0 {
+            let appElement = AXUIElementCreateApplication(application.processIdentifier)
+
+            var extrasMenuBarValue: CFTypeRef?
+            let extrasResult = AXUIElementCopyAttributeValue(
+                appElement,
+                Self.extrasMenuBarAttribute,
+                &extrasMenuBarValue
+            )
+            guard extrasResult == .success, let extrasMenuBarValue else {
+                continue
+            }
+            let extrasMenuBar = extrasMenuBarValue as! AXUIElement
+
+            var childrenValue: CFTypeRef?
+            let childrenResult = AXUIElementCopyAttributeValue(
+                extrasMenuBar,
+                kAXChildrenAttribute as CFString,
+                &childrenValue
+            )
+            guard childrenResult == .success, let children = childrenValue as? [AXUIElement] else {
+                continue
+            }
+
+            for child in children {
+                let snapshot = MenuBarItemSnapshot(
+                    bundleIdentifier: application.bundleIdentifier ?? "unknown.bundle",
+                    processID: application.processIdentifier,
+                    title: copyStringAttribute(kAXTitleAttribute as CFString, from: child),
+                    description: copyStringAttribute(kAXDescriptionAttribute as CFString, from: child),
+                    role: copyStringAttribute(kAXRoleAttribute as CFString, from: child),
+                    subrole: copyStringAttribute(kAXSubroleAttribute as CFString, from: child),
+                    frame: copyFrame(from: child),
+                    actionNames: copyActionNames(from: child)
+                )
+                let record = MenuBarItemRecord(snapshot: snapshot)
+                elementsByRuntimeID[record.id] = child
+                snapshots.append(snapshot)
+            }
+        }
+
+        return snapshots
+    }
+
+    func press(_ runtimeID: String) throws {
+        guard let element = elementsByRuntimeID[runtimeID] else {
+            throw MenuBarAXClientError.itemNotFound(runtimeID)
+        }
+
+        let result = AXUIElementPerformAction(element, kAXPressAction as CFString)
+        guard result == .success else {
+            throw MenuBarAXClientError.pressFailed(runtimeID)
+        }
+    }
+
+    func startObserving(processIDs: Set<Int32>, onChange: @escaping () -> Void) {
+        stopObserving()
+
+        guard !processIDs.isEmpty else {
+            return
+        }
+
+        for processID in processIDs {
+            var observer: AXObserver?
+            let callbackToken = Unmanaged.passRetained(ObservationCallbackBox(onChange))
+            let createResult = AXObserverCreate(processID, Self.observerCallback, &observer)
+            guard createResult == .success, let observer else {
+                callbackToken.release()
+                continue
+            }
+
+            let runLoopSource = AXObserverGetRunLoopSource(observer)
+            let applicationElement = AXUIElementCreateApplication(processID)
+            _ = AXObserverAddNotification(
+                observer,
+                applicationElement,
+                kAXCreatedNotification as CFString,
+                callbackToken.toOpaque()
+            )
+            _ = AXObserverAddNotification(
+                observer,
+                applicationElement,
+                kAXMovedNotification as CFString,
+                callbackToken.toOpaque()
+            )
+            _ = AXObserverAddNotification(
+                observer,
+                applicationElement,
+                kAXUIElementDestroyedNotification as CFString,
+                callbackToken.toOpaque()
+            )
+            CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, CFRunLoopMode.defaultMode)
+            observations[processID] = Observation(
+                observer: observer,
+                source: runLoopSource,
+                callbackToken: callbackToken
+            )
+        }
+    }
+
+    func stopObserving() {
+        guard !observations.isEmpty else {
+            return
+        }
+
+        for observation in observations.values {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), observation.source, CFRunLoopMode.defaultMode)
+            observation.callbackToken.release()
+        }
+        observations.removeAll(keepingCapacity: true)
+    }
+
+    private func copyStringAttribute(_ attribute: CFString, from element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
+            return nil
+        }
+        return value as? String
+    }
+
+    private func copyActionNames(from element: AXUIElement) -> [String] {
+        var value: CFArray?
+        guard AXUIElementCopyActionNames(element, &value) == .success, let actions = value as? [String] else {
+            return []
+        }
+        return actions
+    }
+
+    private func copyFrame(from element: AXUIElement) -> CGRect? {
+        var positionValue: CFTypeRef?
+        var sizeValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionValue) == .success,
+              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeValue) == .success,
+              let positionValue,
+              let sizeValue else {
+            return nil
+        }
+        let positionAXValue = positionValue as! AXValue
+        let sizeAXValue = sizeValue as! AXValue
+
+        var point = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(positionAXValue, .cgPoint, &point),
+              AXValueGetValue(sizeAXValue, .cgSize, &size) else {
+            return nil
+        }
+        return CGRect(origin: point, size: size)
+    }
+}
+
+private final class ObservationCallbackBox {
+    private let callback: () -> Void
+
+    init(_ callback: @escaping () -> Void) {
+        self.callback = callback
+    }
+
+    func invoke() {
+        callback()
+    }
+}
