@@ -384,6 +384,29 @@ final class MenuBarItemRecordTests: XCTestCase {
         XCTAssertEqual(decoded.runtimeID, original.runtimeID)
     }
 
+    func testEncodedIdentityContractIsVersionedAndStable() {
+        let record = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "com.example.contract",
+            processID: 7,
+            title: "Clock",
+            description: "Menu Bar Clock",
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 100, y: 0, width: 24, height: 24),
+            actionNames: ["AXPress", "AXShowMenu"],
+            identityHint: "primary"
+        ))
+
+        XCTAssertEqual(
+            record.persistentID,
+            #"[1,"com.example.contract","AXMenuBarItem",["none"],["some","primary"]]"#
+        )
+        XCTAssertEqual(
+            record.runtimeID,
+            #"[1,"[1,\"com.example.contract\",\"AXMenuBarItem\",[\"none\"],[\"some\",\"primary\"]]","Clock",["AXPress","AXShowMenu"],[100,0,24,24]]"#
+        )
+    }
+
     func testRuntimeIDDiffersForMissingFrameLabels() {
         let left = MenuBarItemRecord(snapshot: .init(
             bundleIdentifier: "com.example.no-frame",

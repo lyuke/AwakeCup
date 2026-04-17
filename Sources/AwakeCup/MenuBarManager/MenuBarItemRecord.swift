@@ -80,6 +80,7 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
 
         self.persistentID = Self.encodeIdentityComponents(
             PersistentIdentityPayload(
+                version: 1,
                 bundleIdentifier: snapshot.bundleIdentifier,
                 role: role,
                 subrole: normalizedSubrole,
@@ -89,6 +90,7 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
 
         self.runtimeID = Self.encodeIdentityComponents(
             RuntimeIdentityPayload(
+                version: 1,
                 persistentID: persistentID,
                 displayName: displayName,
                 actionNames: sortedActionNames,
@@ -112,9 +114,7 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
     }
 
     private static func encodeIdentityComponents<T: Encodable>(_ value: T) -> String {
-        guard let data = try? JSONEncoder().encode(value) else {
-            return ""
-        }
+        let data = try! JSONEncoder().encode(value)
         return String(decoding: data, as: UTF8.self)
     }
 }
@@ -126,31 +126,69 @@ private extension String {
     }
 }
 
-private struct OptionalIdentityString: Codable, Equatable {
+private struct OptionalIdentityString: Encodable, Equatable {
     let value: String?
 
     init(_ value: String?) {
         self.value = value
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.unkeyedContainer()
+        if let value {
+            try container.encode("some")
+            try container.encode(value)
+        } else {
+            try container.encode("none")
+        }
+    }
 }
 
-private struct PersistentIdentityPayload: Codable, Equatable {
+private struct PersistentIdentityPayload: Encodable, Equatable {
+    let version: Int
     let bundleIdentifier: String
     let role: String
     let subrole: OptionalIdentityString
     let identityHint: OptionalIdentityString
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.unkeyedContainer()
+        try container.encode(version)
+        try container.encode(bundleIdentifier)
+        try container.encode(role)
+        try container.encode(subrole)
+        try container.encode(identityHint)
+    }
 }
 
-private struct GeometryIdentity: Codable, Equatable {
+private struct GeometryIdentity: Encodable, Equatable {
     let x: Int
     let y: Int
     let width: Int
     let height: Int
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.unkeyedContainer()
+        try container.encode(x)
+        try container.encode(y)
+        try container.encode(width)
+        try container.encode(height)
+    }
 }
 
-private struct RuntimeIdentityPayload: Codable, Equatable {
+private struct RuntimeIdentityPayload: Encodable, Equatable {
+    let version: Int
     let persistentID: String
     let displayName: String
     let actionNames: [String]
     let geometry: GeometryIdentity
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.unkeyedContainer()
+        try container.encode(version)
+        try container.encode(persistentID)
+        try container.encode(displayName)
+        try container.encode(actionNames)
+        try container.encode(geometry)
+    }
 }
