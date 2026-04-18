@@ -36,6 +36,29 @@ final class MenuBarInventoryServiceTests: XCTestCase {
         XCTAssertTrue(service.records.isEmpty)
     }
 
+    func testRefreshClearsStaleRecordsAndStopsObservingWhenAPreviouslySuccessfulRefreshFails() {
+        let reader = StubMenuBarAXReader()
+        reader.fetchResult = .success([
+            .init(bundleIdentifier: "a", processID: 1, title: "One", description: nil, role: "AXMenuBarItem", subrole: nil, frame: CGRect(x: 20, y: 0, width: 20, height: 24), actionNames: ["AXPress"])
+        ])
+        let service = MenuBarInventoryService(reader: reader)
+
+        service.refresh()
+
+        XCTAssertEqual(service.records.map(\.displayName), ["One"])
+        XCTAssertEqual(reader.startObservationCalls.count, 1)
+        XCTAssertEqual(reader.stopObservationCalls, 0)
+
+        reader.fetchResult = .failure(MenuBarAXClientError.permissionDenied)
+
+        service.refresh()
+
+        XCTAssertEqual(service.records, [])
+        XCTAssertEqual(service.lastRefreshError, "Accessibility permission is required.")
+        XCTAssertEqual(reader.startObservationCalls.count, 1)
+        XCTAssertEqual(reader.stopObservationCalls, 1)
+    }
+
     func testPressDelegatesToReaderUsingRuntimeIdentity() throws {
         let record = MenuBarItemRecord(snapshot: .init(
             bundleIdentifier: "a",

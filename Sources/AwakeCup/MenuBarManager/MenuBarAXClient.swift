@@ -65,7 +65,10 @@ final class MenuBarAXClient: MenuBarAXReading {
             guard extrasResult == .success, let extrasMenuBarValue else {
                 continue
             }
-            let extrasMenuBar = extrasMenuBarValue as! AXUIElement
+            guard CFGetTypeID(extrasMenuBarValue) == AXUIElementGetTypeID() else {
+                continue
+            }
+            let extrasMenuBar = unsafeDowncast(extrasMenuBarValue, to: AXUIElement.self)
 
             var childrenValue: CFTypeRef?
             let childrenResult = AXUIElementCopyAttributeValue(
@@ -187,11 +190,17 @@ final class MenuBarAXClient: MenuBarAXReading {
         guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionValue) == .success,
               AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeValue) == .success,
               let positionValue,
-              let sizeValue else {
+              let sizeValue,
+              CFGetTypeID(positionValue) == AXValueGetTypeID(),
+              CFGetTypeID(sizeValue) == AXValueGetTypeID() else {
             return nil
         }
-        let positionAXValue = positionValue as! AXValue
-        let sizeAXValue = sizeValue as! AXValue
+        let positionAXValue = unsafeDowncast(positionValue, to: AXValue.self)
+        let sizeAXValue = unsafeDowncast(sizeValue, to: AXValue.self)
+        guard AXValueGetType(positionAXValue) == .cgPoint,
+              AXValueGetType(sizeAXValue) == .cgSize else {
+            return nil
+        }
 
         var point = CGPoint.zero
         var size = CGSize.zero

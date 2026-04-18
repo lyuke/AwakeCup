@@ -33,6 +33,8 @@ final class MenuBarInventoryService: ObservableObject {
                 }
             }
         } catch {
+            records = []
+            reader.stopObserving()
             lastRefreshError = error.localizedDescription
         }
     }
