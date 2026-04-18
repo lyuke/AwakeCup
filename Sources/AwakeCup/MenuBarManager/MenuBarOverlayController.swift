@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftUI
 
 @MainActor
 protocol MenuBarOverlayControlling: AnyObject {
@@ -22,6 +23,7 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
 
         let window = hiddenMaskWindow ?? makeHiddenMaskWindow(frame: frame)
         window.setFrame(frame, display: true)
+        window.contentView = makeHiddenMaskContentView(frame: frame)
         window.orderFrontRegardless()
         hiddenMaskWindow = window
     }
@@ -38,6 +40,7 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
 
         let panel = expandedStripPanel ?? makeExpandedStripPanel(frame: frame)
         panel.setFrame(frame, display: true)
+        panel.contentView = makeExpandedStripContentView(hiddenItems: hiddenItems, frame: frame)
         panel.orderFrontRegardless()
         expandedStripPanel = panel
     }
@@ -59,7 +62,7 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
         window.hasShadow = false
         window.ignoresMouseEvents = true
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        window.contentView = NSView(frame: frame)
+        window.contentView = makeHiddenMaskContentView(frame: frame)
         return window
     }
 
@@ -76,8 +79,27 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
         panel.hasShadow = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.hidesOnDeactivate = false
-        panel.contentView = NSView(frame: frame)
+        panel.contentView = makeExpandedStripContentView(hiddenItems: [], frame: frame)
         return panel
+    }
+
+    private func makeHiddenMaskContentView(frame: CGRect) -> NSView {
+        let materialView = NSVisualEffectView(frame: frame)
+        materialView.autoresizingMask = [.width, .height]
+        materialView.material = .underWindowBackground
+        materialView.blendingMode = .withinWindow
+        materialView.state = .active
+        materialView.wantsLayer = true
+        materialView.layer?.cornerRadius = 8
+        materialView.layer?.masksToBounds = true
+        return materialView
+    }
+
+    private func makeExpandedStripContentView(hiddenItems: [MenuBarItemRecord], frame: CGRect) -> NSView {
+        let hostingView = NSHostingView(rootView: MenuBarExpandedStripView(hiddenItems: hiddenItems))
+        hostingView.frame = frame
+        hostingView.autoresizingMask = [.width, .height]
+        return hostingView
     }
 }
 
@@ -91,5 +113,30 @@ private extension Array where Element == MenuBarItemRecord {
             frame = frame.union(item.frame)
         }
         return frame
+    }
+}
+
+private struct MenuBarExpandedStripView: View {
+    let hiddenItems: [MenuBarItemRecord]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(hiddenItems, id: \.id) { item in
+                Text(item.displayName)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(.regularMaterial, in: Capsule())
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.thinMaterial)
+        )
     }
 }
