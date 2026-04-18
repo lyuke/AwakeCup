@@ -23,7 +23,7 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
 
         let window = hiddenMaskWindow ?? makeHiddenMaskWindow(frame: frame)
         window.setFrame(frame, display: true)
-        window.contentView = makeHiddenMaskContentView(frame: frame)
+        window.contentView = makeHiddenMaskContentView(bounds: contentBounds(for: frame))
         window.orderFrontRegardless()
         hiddenMaskWindow = window
     }
@@ -40,7 +40,7 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
 
         let panel = expandedStripPanel ?? makeExpandedStripPanel(frame: frame)
         panel.setFrame(frame, display: true)
-        panel.contentView = makeExpandedStripContentView(hiddenItems: hiddenItems, frame: frame)
+        panel.contentView = makeExpandedStripContentView(hiddenItems: hiddenItems, bounds: contentBounds(for: frame))
         panel.orderFrontRegardless()
         expandedStripPanel = panel
     }
@@ -62,7 +62,7 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
         window.hasShadow = false
         window.ignoresMouseEvents = true
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        window.contentView = makeHiddenMaskContentView(frame: frame)
+        window.contentView = makeHiddenMaskContentView(bounds: contentBounds(for: frame))
         return window
     }
 
@@ -79,12 +79,12 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
         panel.hasShadow = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.hidesOnDeactivate = false
-        panel.contentView = makeExpandedStripContentView(hiddenItems: [], frame: frame)
+        panel.contentView = makeExpandedStripContentView(hiddenItems: [], bounds: contentBounds(for: frame))
         return panel
     }
 
-    private func makeHiddenMaskContentView(frame: CGRect) -> NSView {
-        let materialView = NSVisualEffectView(frame: frame)
+    private func makeHiddenMaskContentView(bounds: CGRect) -> NSView {
+        let materialView = NSVisualEffectView(frame: bounds)
         materialView.autoresizingMask = [.width, .height]
         materialView.material = .underWindowBackground
         materialView.blendingMode = .withinWindow
@@ -95,11 +95,15 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
         return materialView
     }
 
-    private func makeExpandedStripContentView(hiddenItems: [MenuBarItemRecord], frame: CGRect) -> NSView {
+    private func makeExpandedStripContentView(hiddenItems: [MenuBarItemRecord], bounds: CGRect) -> NSView {
         let hostingView = NSHostingView(rootView: MenuBarExpandedStripView(hiddenItems: hiddenItems))
-        hostingView.frame = frame
+        hostingView.frame = bounds
         hostingView.autoresizingMask = [.width, .height]
         return hostingView
+    }
+
+    private func contentBounds(for frame: CGRect) -> CGRect {
+        CGRect(origin: .zero, size: frame.size)
     }
 }
 
