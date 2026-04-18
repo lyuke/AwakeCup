@@ -111,6 +111,40 @@ final class MenuBarManagerViewModelTests: XCTestCase {
         XCTAssertEqual(overlay.lastPresentedStripIDs, [hidden.id])
     }
 
+    func testSetPreferredRevealModeDismissesExpandedStripWhenSwitchingBackToPanel() {
+        let permission = AccessibilityPermissionController(checker: StubAccessibilityTrustChecker(responses: [true, true]))
+        let hidden = makeRecord(
+            bundleIdentifier: "com.example.hidden",
+            processID: 2,
+            title: "Hidden",
+            originX: 40,
+            actionNames: ["AXPress"]
+        )
+        let inventory = MenuBarInventoryService(reader: StubMenuBarAXReader(records: [hidden]))
+        let layout = MenuBarLayoutStore(persistence: InMemoryMenuBarLayoutPersistence())
+        layout.assign(.hidden, toPersistentID: hidden.persistentID)
+        let presentation = MenuBarPresentationController()
+        presentation.configuration.preferredRevealMode = .expandedStrip
+        let overlay = StubMenuBarOverlayController()
+        let viewModel = MenuBarManagerViewModel(
+            permission: permission,
+            inventory: inventory,
+            layout: layout,
+            presentation: presentation,
+            overlay: overlay
+        )
+
+        viewModel.refresh()
+        viewModel.showHiddenItems()
+        let dismissCallsBeforeSwitch = overlay.dismissExpandedStripCalls
+        viewModel.setPreferredRevealMode(.panel)
+
+        XCTAssertNil(presentation.state.activeSurface)
+        XCTAssertEqual(overlay.lastPresentedStripIDs, [])
+        XCTAssertEqual(overlay.dismissExpandedStripCalls, dismissCallsBeforeSwitch + 1)
+        XCTAssertEqual(viewModel.preferredRevealMode, .panel)
+    }
+
     private func makeRecord(
         bundleIdentifier: String,
         processID: Int32,

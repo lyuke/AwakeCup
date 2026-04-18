@@ -80,6 +80,9 @@ final class MenuBarManagerViewModel: ObservableObject {
         }
         presentation.configuration.preferredRevealMode = mode
         preferredRevealMode = mode
+        if mode == .panel, presentation.state.activeSurface == .expandedStrip {
+            presentation.dismiss()
+        }
         syncExpandedStripVisibility()
     }
 
