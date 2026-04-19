@@ -4,6 +4,57 @@ import IOKit.pwr_mgt
 import ServiceManagement
 import SwiftUI
 
+struct LaunchAtLoginLaunchAgentController {
+    let label: String
+    let launchAgentsDir: URL
+    let launchAgentPlistURL: URL
+    let programArguments: [String]
+    var currentUserID: () -> uid_t = { getuid() }
+    var createDirectory: (URL) throws -> Void = { url in
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+    var writeData: (Data, URL) throws -> Void = { data, url in
+        try data.write(to: url, options: .atomic)
+    }
+    var removeItem: (URL) throws -> Void = { url in
+        try FileManager.default.removeItem(at: url)
+    }
+    var runLaunchctl: ([String]) throws -> String
+
+    func enable() throws {
+        try createDirectory(launchAgentsDir)
+
+        let plist: [String: Any] = [
+            "Label": label,
+            "RunAtLoad": true,
+            "KeepAlive": false,
+            "ProcessType": "Interactive",
+            "ProgramArguments": programArguments,
+        ]
+
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try writeData(data, launchAgentPlistURL)
+
+        let uid = String(currentUserID())
+        let domainTarget = "gui/\(uid)"
+
+        _ = try? runLaunchctl(["bootout", "\(domainTarget)/\(label)"])
+        do {
+            _ = try runLaunchctl(["bootstrap", domainTarget, launchAgentPlistURL.path])
+        } catch {
+            try? removeItem(launchAgentPlistURL)
+            throw error
+        }
+    }
+
+    func disable() throws {
+        let uid = String(currentUserID())
+        let domainTarget = "gui/\(uid)"
+        _ = try? runLaunchctl(["bootout", "\(domainTarget)/\(label)"])
+        try? removeItem(launchAgentPlistURL)
+    }
+}
+
 private enum LaunchAtLogin {
     private static let bundleID = "com.awakecup.app"
     private static let launchAgentLabel = "com.awakecup.app.launchatlogin"
@@ -15,6 +66,16 @@ private enum LaunchAtLogin {
 
     private static var launchAgentPlistURL: URL {
         launchAgentsDir.appendingPathComponent("\(launchAgentLabel).plist")
+    }
+
+    private static var launchAgentController: LaunchAtLoginLaunchAgentController {
+        LaunchAtLoginLaunchAgentController(
+            label: launchAgentLabel,
+            launchAgentsDir: launchAgentsDir,
+            launchAgentPlistURL: launchAgentPlistURL,
+            programArguments: programArguments,
+            runLaunchctl: runLaunchctl
+        )
     }
 
     private static var isRunningFromAppBundle: Bool {
@@ -30,10 +91,19 @@ private enum LaunchAtLogin {
     }
 
     static func currentEnabledState() -> Bool {
+        let launchAgentExists = FileManager.default.fileExists(atPath: launchAgentPlistURL.path)
         if #available(macOS 13.0, *), isRunningFromAppBundle {
-            return SMAppService.mainApp.status == .enabled
+            return LaunchAtLoginEnabledState.from(
+                isRunningFromAppBundle: true,
+                appServiceEnabled: SMAppService.mainApp.status == .enabled,
+                launchAgentExists: launchAgentExists
+            )
         }
-        return FileManager.default.fileExists(atPath: launchAgentPlistURL.path)
+        return LaunchAtLoginEnabledState.from(
+            isRunningFromAppBundle: false,
+            appServiceEnabled: false,
+            launchAgentExists: launchAgentExists
+        )
     }
 
     static func setEnabled(_ enabled: Bool) throws {
@@ -44,6 +114,12 @@ private enum LaunchAtLogin {
                     try SMAppService.mainApp.register()
                 } else {
                     try SMAppService.mainApp.unregister()
+                }
+                if LaunchAtLoginFallbackCleanupPolicy.shouldDisableLaunchAgentAfterAppServiceSuccess(
+                    isRunningFromAppBundle: isRunningFromAppBundle,
+                    requestedEnabled: enabled
+                ) {
+                    try disableViaLaunchAgent()
                 }
                 return
             } catch {
@@ -59,32 +135,11 @@ private enum LaunchAtLogin {
     }
 
     private static func enableViaLaunchAgent() throws {
-        try FileManager.default.createDirectory(at: launchAgentsDir, withIntermediateDirectories: true)
-
-        let plist: [String: Any] = [
-            "Label": launchAgentLabel,
-            "RunAtLoad": true,
-            "KeepAlive": false,
-            "ProcessType": "Interactive",
-            "ProgramArguments": programArguments,
-        ]
-
-        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
-        try data.write(to: launchAgentPlistURL, options: .atomic)
-
-        let uid = String(getuid())
-        let domainTarget = "gui/\(uid)"
-
-        // 若已加载，先卸载再加载，避免 bootstrap 报错。
-        _ = try? runLaunchctl(["bootout", "\(domainTarget)/\(launchAgentLabel)"])
-        _ = try runLaunchctl(["bootstrap", domainTarget, launchAgentPlistURL.path])
+        try launchAgentController.enable()
     }
 
     private static func disableViaLaunchAgent() throws {
-        let uid = String(getuid())
-        let domainTarget = "gui/\(uid)"
-        _ = try? runLaunchctl(["bootout", "\(domainTarget)/\(launchAgentLabel)"])
-        try? FileManager.default.removeItem(at: launchAgentPlistURL)
+        try launchAgentController.disable()
     }
 
     @discardableResult
@@ -111,6 +166,100 @@ private enum LaunchAtLogin {
             )
         }
         return out
+    }
+}
+
+enum LaunchAtLoginEnabledState {
+    static func from(
+        isRunningFromAppBundle: Bool,
+        appServiceEnabled: Bool,
+        launchAgentExists: Bool
+    ) -> Bool {
+        if isRunningFromAppBundle {
+            return appServiceEnabled || launchAgentExists
+        }
+        return launchAgentExists
+    }
+}
+
+enum LaunchAtLoginFallbackCleanupPolicy {
+    static func shouldDisableLaunchAgentAfterAppServiceSuccess(
+        isRunningFromAppBundle: Bool,
+        requestedEnabled: Bool
+    ) -> Bool {
+        guard isRunningFromAppBundle else {
+            return false
+        }
+        return true
+    }
+}
+
+struct LaunchAtLoginToggleCoordinator {
+    var displayedValue: Bool = false
+    private(set) var isApplying: Bool = false
+    private var suppressNextApply = false
+
+    mutating func prepareForProgrammaticValueChange(to value: Bool) {
+        displayedValue = value
+        suppressNextApply = true
+    }
+
+    mutating func beginUserInitiatedApplyIfNeeded() -> Bool {
+        if suppressNextApply {
+            suppressNextApply = false
+            return false
+        }
+        guard !isApplying else {
+            return false
+        }
+        isApplying = true
+        return true
+    }
+
+    mutating func finishApply(success: Bool, attemptedValue: Bool) {
+        isApplying = false
+        guard !success else {
+            return
+        }
+        prepareForProgrammaticValueChange(to: !attemptedValue)
+    }
+}
+
+struct ActivationTimeline: Equatable {
+    let activationStartTime: Date?
+    let activeUntil: Date?
+
+    static func from(isActive: Bool, requestedEnd: Date?, now: Date = Date()) -> ActivationTimeline {
+        guard isActive else {
+            return ActivationTimeline(activationStartTime: nil, activeUntil: nil)
+        }
+
+        guard let requestedEnd else {
+            return ActivationTimeline(activationStartTime: nil, activeUntil: nil)
+        }
+
+        return ActivationTimeline(
+            activationStartTime: now,
+            activeUntil: requestedEnd
+        )
+    }
+}
+
+enum ResolvedWakeMode {
+    static func from(
+        isSystemActive: Bool,
+        isDisplayActive: Bool
+    ) -> CaffeineManager.Mode? {
+        switch (isSystemActive, isDisplayActive) {
+        case (true, true):
+            return .systemAndDisplay
+        case (true, false):
+            return .systemOnly
+        case (false, true):
+            return .displayOnly
+        case (false, false):
+            return nil
+        }
     }
 }
 
@@ -247,11 +396,18 @@ final class CaffeineManager: ObservableObject {
             }
         }
 
-        activeMode = (isSystemActive || isDisplayActive) ? mode : nil
-        activeUntil = date
-        activationStartTime = date != nil ? Date() : nil
+        activeMode = ResolvedWakeMode.from(
+            isSystemActive: isSystemActive,
+            isDisplayActive: isDisplayActive
+        )
+        let timeline = ActivationTimeline.from(
+            isActive: isSystemActive || isDisplayActive,
+            requestedEnd: date
+        )
+        activeUntil = timeline.activeUntil
+        activationStartTime = timeline.activationStartTime
 
-        if let date {
+        if let date = timeline.activeUntil {
             let interval = max(0, date.timeIntervalSinceNow)
             stopTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
                 Task { @MainActor in
@@ -339,14 +495,21 @@ struct MenuBarIconState: Equatable {
             )
         }
 
-        let mode: Mode?
-        switch activeMode {
-        case .systemOnly:
+        let mode: Mode
+        switch (isSystemActive, isDisplayActive, activeMode) {
+        case (true, false, _):
             mode = .systemOnly
-        case .displayOnly:
+        case (false, true, _):
             mode = .displayOnly
-        case .systemAndDisplay, .none:
+        case (true, true, _):
             mode = .systemAndDisplay
+        case (false, false, _):
+            return MenuBarIconState(
+                isActive: false,
+                mode: nil,
+                activationStartTime: nil,
+                activeUntil: nil
+            )
         }
 
         return MenuBarIconState(
@@ -568,13 +731,42 @@ private func menuBarHelpText(system: Bool, display: Bool, activeUntil: Date?) ->
 struct AwakeCupApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var caffeine = CaffeineManager.shared
+    @StateObject private var permissionController: AccessibilityPermissionController
+    @StateObject private var inventoryService: MenuBarInventoryService
+    @StateObject private var layoutStore: MenuBarLayoutStore
+    @StateObject private var presentationController: MenuBarPresentationController
+    @StateObject private var menuBarManager: MenuBarManagerViewModel
 
     @State private var selectedMode: CaffeineManager.Mode = .systemAndDisplay
     @AppStorage("launchAtLogin") private var launchAtLogin: Bool = false
-    @State private var isApplyingLaunchAtLogin: Bool = false
+    @State private var launchAtLoginCoordinator = LaunchAtLoginToggleCoordinator()
     @State private var customDurationValue: String = ""
     @State private var customDurationUnit: CustomDurationEntry.Unit = .minutes
     @AppStorage("customDurationHistory") private var historyData: Data = Data()
+    private let overlayController: MenuBarOverlayController
+
+    init() {
+        let permission = AccessibilityPermissionController()
+        let inventory = MenuBarInventoryService()
+        let layout = MenuBarLayoutStore()
+        let presentation = MenuBarPresentationController()
+        let overlay = MenuBarOverlayController()
+
+        _permissionController = StateObject(wrappedValue: permission)
+        _inventoryService = StateObject(wrappedValue: inventory)
+        _layoutStore = StateObject(wrappedValue: layout)
+        _presentationController = StateObject(wrappedValue: presentation)
+        _menuBarManager = StateObject(
+            wrappedValue: MenuBarManagerViewModel(
+                permission: permission,
+                inventory: inventory,
+                layout: layout,
+                presentation: presentation,
+                overlay: overlay
+            )
+        )
+        overlayController = overlay
+    }
 
     private var history: [CustomDurationEntry] {
         (try? JSONDecoder().decode([CustomDurationEntry].self, from: historyData)) ?? []
@@ -612,139 +804,150 @@ struct AwakeCupApp: App {
         caffeine.activate(mode: selectedMode, for: safeEntry.seconds)
     }
 
-    var body: some Scene {
-        MenuBarExtra {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(modeStatusText(system: caffeine.isSystemActive, display: caffeine.isDisplayActive))
-                    Spacer()
-                    if caffeine.isSystemActive || caffeine.isDisplayActive {
-                        Button("停止") { caffeine.deactivate() }
-                            .keyboardShortcut("s")
+    private var currentControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(modeStatusText(system: caffeine.isSystemActive, display: caffeine.isDisplayActive))
+                Spacer()
+                if caffeine.isSystemActive || caffeine.isDisplayActive {
+                    Button("停止") { caffeine.deactivate() }
+                        .keyboardShortcut("s")
+                }
+            }
+
+            if (caffeine.isSystemActive || caffeine.isDisplayActive), let until = caffeine.activeUntil {
+                Text("将在 \(until.formatted(date: .omitted, time: .shortened)) 停止")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            Toggle(
+                "开机自启动",
+                isOn: Binding(
+                    get: { launchAtLoginCoordinator.displayedValue },
+                    set: { newValue in
+                        launchAtLoginCoordinator.displayedValue = newValue
+                        launchAtLogin = newValue
+                    }
+                )
+            )
+                .disabled(launchAtLoginCoordinator.isApplying)
+                .onAppear {
+                    // 以实际系统状态为准（避免 UserDefaults 与系统不同步）。
+                    let currentValue = LaunchAtLogin.currentEnabledState()
+                    launchAtLoginCoordinator.prepareForProgrammaticValueChange(to: currentValue)
+                    launchAtLogin = currentValue
+                }
+                .onChange(of: launchAtLoginCoordinator.displayedValue) { newValue in
+                    guard launchAtLoginCoordinator.beginUserInitiatedApplyIfNeeded() else { return }
+                    Task { @MainActor in
+                        do {
+                            try LaunchAtLogin.setEnabled(newValue)
+                            launchAtLoginCoordinator.finishApply(success: true, attemptedValue: newValue)
+                        } catch {
+                            launchAtLoginCoordinator.finishApply(success: false, attemptedValue: newValue)
+                            launchAtLogin = launchAtLoginCoordinator.displayedValue
+
+                            let alert = NSAlert()
+                            alert.alertStyle = .warning
+                            alert.messageText = "无法设置开机自启动"
+                            alert.informativeText = error.localizedDescription
+                            alert.addButton(withTitle: "好")
+                            alert.runModal()
+                        }
                     }
                 }
 
-                if (caffeine.isSystemActive || caffeine.isDisplayActive), let until = caffeine.activeUntil {
-                    Text("将在 \(until.formatted(date: .omitted, time: .shortened)) 停止")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            Text("保持目标")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker("保持目标", selection: $selectedMode) {
+                ForEach(CaffeineManager.Mode.allCases) { mode in
+                    Text(mode.title).tag(mode)
                 }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
 
-                Divider()
+            Text("开始保持唤醒")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
-                Toggle("开机自启动", isOn: $launchAtLogin)
-                    .disabled(isApplyingLaunchAtLogin)
-                    .onAppear {
-                        // 以实际系统状态为准（避免 UserDefaults 与系统不同步）。
-                        launchAtLogin = LaunchAtLogin.currentEnabledState()
-                    }
-                    .onChange(of: launchAtLogin) { newValue in
-                        guard !isApplyingLaunchAtLogin else { return }
-                        isApplyingLaunchAtLogin = true
-                        Task { @MainActor in
-                            defer { isApplyingLaunchAtLogin = false }
-                            do {
-                                try LaunchAtLogin.setEnabled(newValue)
-                            } catch {
-                                // 回滚 UI 状态
-                                launchAtLogin.toggle()
-
-                                let alert = NSAlert()
-                                alert.alertStyle = .warning
-                                alert.messageText = "无法设置开机自启动"
-                                alert.informativeText = error.localizedDescription
-                                alert.addButton(withTitle: "好")
-                                alert.runModal()
-                            }
+            HStack(spacing: 4) {
+                TextField("30", text: $customDurationValue)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 50)
+                    .onChange(of: customDurationValue) { newValue in
+                        let filtered = newValue.filter { $0.isNumber }
+                        if filtered != newValue {
+                            customDurationValue = filtered
                         }
                     }
 
-                Text("保持目标")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Picker("保持目标", selection: $selectedMode) {
-                    ForEach(CaffeineManager.Mode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                Picker("", selection: $customDurationUnit) {
+                    ForEach(CustomDurationEntry.Unit.allCases) { unit in
+                        Text(unit.displayName).tag(unit)
                     }
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
+                .frame(width: 60)
 
-                Text("开始保持唤醒")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                // Custom duration input
-                HStack(spacing: 4) {
-                    TextField("30", text: $customDurationValue)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 50)
-                        .onChange(of: customDurationValue) { newValue in
-                            let filtered = newValue.filter { $0.isNumber }
-                            if filtered != newValue {
-                                customDurationValue = filtered
-                            }
-                        }
-
-                    Picker("", selection: $customDurationUnit) {
-                        ForEach(CustomDurationEntry.Unit.allCases) { unit in
-                            Text(unit.displayName).tag(unit)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .frame(width: 60)
-
-                    Button("开始") {
-                        activateCustom()
-                    }
-                    .disabled(!canActivateCustom)
-                    .buttonStyle(.bordered)
+                Button("开始") {
+                    activateCustom()
                 }
-
-                // History row
-                if !history.isEmpty {
-                    HStack(spacing: 2) {
-                        Text("最近：")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        ForEach(history) { entry in
-                            Button(entry.displayTitle) {
-                                activateFromHistory(entry)
-                            }
-                            .font(.caption)
-                            .buttonStyle(.link)
-                            if entry.id != history.last?.id {
-                                Text("·")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-
-                Divider()
-
-                // Fixed duration options
-                ForEach(DurationOption.allCases) { option in
-                    Button(option.title) {
-                        if let seconds = option.seconds {
-                            caffeine.activate(mode: selectedMode, for: seconds)
-                        } else {
-                            caffeine.activateIndefinitely(mode: selectedMode)
-                        }
-                    }
-                    .disabled((caffeine.isSystemActive || caffeine.isDisplayActive) && option == .indefinite && caffeine.activeUntil == nil && caffeine.activeMode == selectedMode)
-                }
-
-                Divider()
-
-                Button("退出") { NSApp.terminate(nil) }
-                    .keyboardShortcut("q")
+                .disabled(!canActivateCustom)
+                .buttonStyle(.bordered)
             }
-            .padding(12)
-            .frame(minWidth: 220)
+
+            if !history.isEmpty {
+                HStack(spacing: 2) {
+                    Text("最近：")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(history) { entry in
+                        Button(entry.displayTitle) {
+                            activateFromHistory(entry)
+                        }
+                        .font(.caption)
+                        .buttonStyle(.link)
+                        if entry.id != history.last?.id {
+                            Text("·")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            ForEach(DurationOption.allCases) { option in
+                Button(option.title) {
+                    if let seconds = option.seconds {
+                        caffeine.activate(mode: selectedMode, for: seconds)
+                    } else {
+                        caffeine.activateIndefinitely(mode: selectedMode)
+                    }
+                }
+                .disabled((caffeine.isSystemActive || caffeine.isDisplayActive) && option == .indefinite && caffeine.activeUntil == nil && caffeine.activeMode == selectedMode)
+            }
+
+            Divider()
+
+            Button("退出") { NSApp.terminate(nil) }
+                .keyboardShortcut("q")
+        }
+    }
+
+    var body: some Scene {
+        MenuBarExtra {
+            MenuBarExtraContentView(manager: menuBarManager) {
+                currentControls
+            }
         } label: {
             Image(nsImage: MenuBarIcon.makeImage(
                 isSystemActive: caffeine.isSystemActive,
@@ -758,6 +961,11 @@ struct AwakeCupApp: App {
                 display: caffeine.isDisplayActive,
                 activeUntil: caffeine.activeUntil
             ))
+        }
+        .menuBarExtraStyle(.window)
+
+        Window("菜单栏管理", id: menuBarManagerSettingsWindowID) {
+            MenuBarManagerSettingsView(viewModel: menuBarManager)
         }
     }
 }
