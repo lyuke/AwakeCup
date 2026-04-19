@@ -19,11 +19,17 @@ enum MenuBarAXClientError: LocalizedError, Equatable {
     }
 }
 
+enum MenuBarAXObservationRegistrationPolicy {
+    static func shouldTrackObserver(notificationResults: [AXError]) -> Bool {
+        notificationResults.contains(.success)
+    }
+}
+
 @MainActor
 protocol MenuBarAXReading: AnyObject {
     func fetchSnapshots() throws -> [MenuBarItemSnapshot]
     func press(_ runtimeID: String) throws
-    func startObserving(processIDs: Set<Int32>, onChange: @escaping () -> Void)
+    func startObserving(processIDs: Set<Int32>, onChange: @escaping () -> Void) -> Set<Int32>
     func stopObserving()
 }
 
@@ -44,6 +50,19 @@ final class MenuBarAXClient: MenuBarAXReading {
 
     private var observations: [Int32: Observation] = [:]
     private var elementsByRuntimeID: [String: AXUIElement] = [:]
+
+    nonisolated static func identityHint(identifier: String?, help: String?, siblingIndex: Int?) -> String? {
+        if let identifier = normalizedIdentityAttribute(identifier) {
+            return "identifier:\(identifier)"
+        }
+        if let help = normalizedIdentityAttribute(help) {
+            return "help:\(help)"
+        }
+        if let siblingIndex {
+            return "index:\(siblingIndex)"
+        }
+        return nil
+    }
 
     func fetchSnapshots() throws -> [MenuBarItemSnapshot] {
         guard AXIsProcessTrusted() else {
@@ -80,7 +99,8 @@ final class MenuBarAXClient: MenuBarAXReading {
                 continue
             }
 
-            for child in children {
+            let shouldIncludeSiblingIndex = children.count > 1
+            for (index, child) in children.enumerated() {
                 let snapshot = MenuBarItemSnapshot(
                     bundleIdentifier: application.bundleIdentifier ?? "unknown.bundle",
                     processID: application.processIdentifier,
@@ -89,7 +109,12 @@ final class MenuBarAXClient: MenuBarAXReading {
                     role: copyStringAttribute(kAXRoleAttribute as CFString, from: child),
                     subrole: copyStringAttribute(kAXSubroleAttribute as CFString, from: child),
                     frame: copyFrame(from: child),
-                    actionNames: copyActionNames(from: child)
+                    actionNames: copyActionNames(from: child),
+                    identityHint: Self.identityHint(
+                        identifier: copyStringAttribute(kAXIdentifierAttribute as CFString, from: child),
+                        help: copyStringAttribute(kAXHelpAttribute as CFString, from: child),
+                        siblingIndex: shouldIncludeSiblingIndex ? index + 1 : nil
+                    )
                 )
                 let record = MenuBarItemRecord(snapshot: snapshot)
                 elementsByRuntimeID[record.id] = child
@@ -111,13 +136,14 @@ final class MenuBarAXClient: MenuBarAXReading {
         }
     }
 
-    func startObserving(processIDs: Set<Int32>, onChange: @escaping () -> Void) {
+    func startObserving(processIDs: Set<Int32>, onChange: @escaping () -> Void) -> Set<Int32> {
         stopObserving()
 
         guard !processIDs.isEmpty else {
-            return
+            return []
         }
 
+        var observedProcessIDs: Set<Int32> = []
         for processID in processIDs {
             var observer: AXObserver?
             let callbackToken = Unmanaged.passRetained(ObservationCallbackBox(onChange))
@@ -129,31 +155,42 @@ final class MenuBarAXClient: MenuBarAXReading {
 
             let runLoopSource = AXObserverGetRunLoopSource(observer)
             let applicationElement = AXUIElementCreateApplication(processID)
-            _ = AXObserverAddNotification(
+            let notificationResults = [
+                AXObserverAddNotification(
                 observer,
                 applicationElement,
                 kAXCreatedNotification as CFString,
                 callbackToken.toOpaque()
-            )
-            _ = AXObserverAddNotification(
+                ),
+                AXObserverAddNotification(
                 observer,
                 applicationElement,
                 kAXMovedNotification as CFString,
                 callbackToken.toOpaque()
-            )
-            _ = AXObserverAddNotification(
+                ),
+                AXObserverAddNotification(
                 observer,
                 applicationElement,
                 kAXUIElementDestroyedNotification as CFString,
                 callbackToken.toOpaque()
-            )
+                ),
+            ]
+            guard MenuBarAXObservationRegistrationPolicy.shouldTrackObserver(
+                notificationResults: notificationResults
+            ) else {
+                callbackToken.release()
+                continue
+            }
             CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, CFRunLoopMode.defaultMode)
             observations[processID] = Observation(
                 observer: observer,
                 source: runLoopSource,
                 callbackToken: callbackToken
             )
+            observedProcessIDs.insert(processID)
         }
+
+        return observedProcessIDs
     }
 
     func stopObserving() {
@@ -209,6 +246,14 @@ final class MenuBarAXClient: MenuBarAXReading {
             return nil
         }
         return CGRect(origin: point, size: size)
+    }
+
+    private nonisolated static func normalizedIdentityAttribute(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

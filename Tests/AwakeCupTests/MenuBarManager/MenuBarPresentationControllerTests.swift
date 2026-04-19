@@ -4,6 +4,23 @@ import XCTest
 
 @MainActor
 final class MenuBarPresentationControllerTests: XCTestCase {
+    func testShowPreferredAutoCollapsesExpandedStripAfterConfiguredDelay() {
+        let controller = MenuBarPresentationController()
+        controller.configuration = MenuBarPresentationConfiguration(
+            preferredRevealMode: .expandedStrip,
+            autoCollapseAfter: 0.01
+        )
+
+        controller.showPreferred(canPresentExpandedStrip: true)
+
+        XCTAssertEqual(controller.state.activeSurface, .expandedStrip)
+
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+
+        XCTAssertNil(controller.state.activeSurface)
+        XCTAssertNil(controller.state.autoCollapseDeadline)
+    }
+
     func testShowPreferredUsesExpandedStripWhenAvailable() {
         let controller = MenuBarPresentationController()
         controller.configuration = MenuBarPresentationConfiguration(

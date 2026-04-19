@@ -6,7 +6,10 @@ import SwiftUI
 protocol MenuBarOverlayControlling: AnyObject {
     func updateHiddenMask(for hiddenItems: [MenuBarItemRecord])
     func hideHiddenMask()
-    func presentExpandedStrip(for hiddenItems: [MenuBarItemRecord])
+    func presentExpandedStrip(
+        for hiddenItems: [MenuBarItemRecord],
+        onPress: @escaping (MenuBarItemRecord) -> Void
+    )
     func dismissExpandedStrip()
 }
 
@@ -32,7 +35,10 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
         hiddenMaskWindow?.orderOut(nil)
     }
 
-    func presentExpandedStrip(for hiddenItems: [MenuBarItemRecord]) {
+    func presentExpandedStrip(
+        for hiddenItems: [MenuBarItemRecord],
+        onPress: @escaping (MenuBarItemRecord) -> Void
+    ) {
         guard let frame = hiddenItems.boundingFrame else {
             dismissExpandedStrip()
             return
@@ -40,7 +46,11 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
 
         let panel = expandedStripPanel ?? makeExpandedStripPanel(frame: frame)
         panel.setFrame(frame, display: true)
-        panel.contentView = makeExpandedStripContentView(hiddenItems: hiddenItems, bounds: contentBounds(for: frame))
+        panel.contentView = makeExpandedStripContentView(
+            hiddenItems: hiddenItems,
+            bounds: contentBounds(for: frame),
+            onPress: onPress
+        )
         panel.orderFrontRegardless()
         expandedStripPanel = panel
     }
@@ -79,7 +89,11 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
         panel.hasShadow = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.hidesOnDeactivate = false
-        panel.contentView = makeExpandedStripContentView(hiddenItems: [], bounds: contentBounds(for: frame))
+        panel.contentView = makeExpandedStripContentView(
+            hiddenItems: [],
+            bounds: contentBounds(for: frame),
+            onPress: { _ in }
+        )
         return panel
     }
 
@@ -95,8 +109,17 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
         return materialView
     }
 
-    private func makeExpandedStripContentView(hiddenItems: [MenuBarItemRecord], bounds: CGRect) -> NSView {
-        let hostingView = NSHostingView(rootView: MenuBarExpandedStripView(hiddenItems: hiddenItems))
+    private func makeExpandedStripContentView(
+        hiddenItems: [MenuBarItemRecord],
+        bounds: CGRect,
+        onPress: @escaping (MenuBarItemRecord) -> Void
+    ) -> NSView {
+        let hostingView = NSHostingView(
+            rootView: MenuBarExpandedStripView(
+                hiddenItems: hiddenItems,
+                onPress: onPress
+            )
+        )
         hostingView.frame = bounds
         hostingView.autoresizingMask = [.width, .height]
         return hostingView
@@ -122,17 +145,23 @@ private extension Array where Element == MenuBarItemRecord {
 
 private struct MenuBarExpandedStripView: View {
     let hiddenItems: [MenuBarItemRecord]
+    let onPress: (MenuBarItemRecord) -> Void
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(hiddenItems, id: \.id) { item in
-                Text(item.displayName)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(.regularMaterial, in: Capsule())
+                Button {
+                    onPress(item)
+                } label: {
+                    Text(item.displayName)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(.regularMaterial, in: Capsule())
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 8)

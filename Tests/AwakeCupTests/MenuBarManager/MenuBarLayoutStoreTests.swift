@@ -131,6 +131,67 @@ final class MenuBarLayoutStoreTests: XCTestCase {
         XCTAssertEqual(visible.map(\.displayName), ["One"])
     }
 
+    func testOrderedItemsPlacesUnknownFramesAfterKnownPositionsWhenNoSavedOrderExists() {
+        let store = MenuBarLayoutStore(persistence: InMemoryLayoutPersistence())
+        let known = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "known",
+            processID: 1,
+            title: "Known",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 10, y: 0, width: 20, height: 24),
+            actionNames: ["AXPress"]
+        ))
+        let unknown = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "unknown",
+            processID: 2,
+            title: "Unknown",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: nil,
+            actionNames: ["AXPress"]
+        ))
+
+        store.assign(.hidden, toPersistentID: known.persistentID)
+        store.assign(.hidden, toPersistentID: unknown.persistentID)
+
+        let ordered = store.orderedItems(inventory: [unknown, known], section: .hidden)
+
+        XCTAssertEqual(ordered.map(\.displayName), ["Known", "Unknown"])
+        XCTAssertEqual(ordered.map(\.hasKnownFrame), [true, false])
+    }
+
+    func testAssignBatchUpdatesAllProvidedPersistentIDs() {
+        let store = MenuBarLayoutStore(persistence: InMemoryLayoutPersistence())
+        let first = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "first",
+            processID: 1,
+            title: "First",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 10, y: 0, width: 20, height: 24),
+            actionNames: ["AXPress"]
+        ))
+        let second = MenuBarItemRecord(snapshot: .init(
+            bundleIdentifier: "second",
+            processID: 2,
+            title: "Second",
+            description: nil,
+            role: "AXMenuBarItem",
+            subrole: nil,
+            frame: CGRect(x: 40, y: 0, width: 20, height: 24),
+            actionNames: ["AXPress"]
+        ))
+
+        store.assign(.hidden, toPersistentIDs: [first.persistentID, second.persistentID])
+
+        XCTAssertEqual(store.section(for: first), .hidden)
+        XCTAssertEqual(store.section(for: second), .hidden)
+    }
+
     func testCorruptPersistedJSONFallsBackToDefaultConfiguration() {
         let store = MenuBarLayoutStore(persistence: CorruptLayoutPersistence())
 

@@ -49,6 +49,7 @@ final class MenuBarPresentationController: ObservableObject {
 
     private let persistence: MenuBarPresentationPersisting
     private let storageKey = "menuBarManagerPresentation"
+    private var autoCollapseTimer: Timer?
 
     init(persistence: MenuBarPresentationPersisting = UserDefaultsMenuBarPresentationPersistence()) {
         self.persistence = persistence
@@ -64,14 +65,16 @@ final class MenuBarPresentationController: ObservableObject {
         switch configuration.preferredRevealMode {
         case .expandedStrip where canPresentExpandedStrip:
             activate(.expandedStrip, autoCollapseDeadline: now.addingTimeInterval(configuration.autoCollapseAfter))
+            scheduleAutoCollapse(after: configuration.autoCollapseAfter)
         default:
             activate(.panel, autoCollapseDeadline: nil)
+            cancelAutoCollapse()
         }
     }
 
     func dismiss() {
-        state.activeSurface = nil
-        state.autoCollapseDeadline = nil
+        cancelAutoCollapse()
+        state = MenuBarPresentationState()
     }
 
     func tick(now: Date = Date()) {
@@ -82,8 +85,24 @@ final class MenuBarPresentationController: ObservableObject {
     }
 
     private func activate(_ surface: MenuBarPresentationSurface, autoCollapseDeadline: Date?) {
-        state.activeSurface = surface
-        state.autoCollapseDeadline = autoCollapseDeadline
+        state = MenuBarPresentationState(
+            activeSurface: surface,
+            autoCollapseDeadline: autoCollapseDeadline
+        )
+    }
+
+    private func scheduleAutoCollapse(after interval: TimeInterval) {
+        cancelAutoCollapse()
+        autoCollapseTimer = Timer.scheduledTimer(withTimeInterval: max(0, interval), repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.tick()
+            }
+        }
+    }
+
+    private func cancelAutoCollapse() {
+        autoCollapseTimer?.invalidate()
+        autoCollapseTimer = nil
     }
 
     private func persist() {

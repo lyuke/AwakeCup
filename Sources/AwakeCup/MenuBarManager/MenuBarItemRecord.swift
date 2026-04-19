@@ -53,6 +53,7 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
     let displayName: String
     let axRole: String
     let axSubrole: String?
+    let hasKnownFrame: Bool
     let frame: CGRect
     let actionNames: [String]
     let manageability: MenuBarItemManageability
@@ -61,6 +62,7 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
 
     init(snapshot: MenuBarItemSnapshot) {
         let role = snapshot.role ?? "AXUnknown"
+        let hasKnownFrame = snapshot.frame != nil
         let frame = snapshot.frame ?? .zero
         let sortedActionNames = snapshot.actionNames.sorted()
         let displayName = snapshot.title?.nonEmpty
@@ -108,6 +110,7 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
         self.displayName = displayName
         self.axRole = role
         self.axSubrole = snapshot.subrole
+        self.hasKnownFrame = hasKnownFrame
         self.frame = frame
         self.actionNames = sortedActionNames
         self.manageability = manageability
@@ -116,6 +119,27 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
     private static func encodeIdentityComponents<T: Encodable>(_ value: T) -> String {
         let data = try! JSONEncoder().encode(value)
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+extension MenuBarItemRecord {
+    static func sortsBeforeInDisplayOrder(_ left: MenuBarItemRecord, _ right: MenuBarItemRecord) -> Bool {
+        switch (left.hasKnownFrame, right.hasKnownFrame) {
+        case (true, false):
+            return true
+        case (false, true):
+            return false
+        case (false, false):
+            return left.persistentID < right.persistentID
+        case (true, true):
+            if left.frame.minX != right.frame.minX {
+                return left.frame.minX < right.frame.minX
+            }
+            if left.frame.minY != right.frame.minY {
+                return left.frame.minY < right.frame.minY
+            }
+            return left.persistentID < right.persistentID
+        }
     }
 }
 

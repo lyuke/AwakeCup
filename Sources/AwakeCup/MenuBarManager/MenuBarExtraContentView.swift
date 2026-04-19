@@ -62,6 +62,11 @@ struct MenuBarExtraContentView<Controls: View>: View {
                 }
                 .disabled(manager.hiddenItems.isEmpty)
 
+                Button("隐藏其他顶部图标") {
+                    manager.hideOtherVisibleItems()
+                }
+                .disabled(!manager.canHideOtherVisibleItems)
+
                 Button("菜单栏管理") {
                     NSApp.activate(ignoringOtherApps: true)
                     openWindow(id: menuBarManagerSettingsWindowID)

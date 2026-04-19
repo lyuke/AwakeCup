@@ -33,6 +33,17 @@ struct MenuBarManagerSettingsView: View {
     @ViewBuilder
     private var contentSection: some View {
         if viewModel.canManageItems {
+            Section("快捷操作") {
+                Button("隐藏其他顶部图标") {
+                    viewModel.hideOtherVisibleItems()
+                }
+                .disabled(!viewModel.canHideOtherVisibleItems)
+
+                Text("将除 AwakeCup 外当前可管理的顶部图标批量移到隐藏项。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("始终显示") {
                 if viewModel.alwaysVisibleItems.isEmpty {
                     emptyState("当前没有固定显示的项目。")

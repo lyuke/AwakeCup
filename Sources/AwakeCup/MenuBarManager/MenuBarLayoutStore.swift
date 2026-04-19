@@ -45,6 +45,17 @@ final class MenuBarLayoutStore: ObservableObject {
         persist()
     }
 
+    func assign(_ section: MenuBarItemSection, toPersistentIDs persistentIDs: [String]) {
+        guard !persistentIDs.isEmpty else {
+            return
+        }
+
+        for persistentID in persistentIDs {
+            configuration.assignments[persistentID] = section
+        }
+        persist()
+    }
+
     func updateOrder(for section: MenuBarItemSection, persistentIDs: [String]) {
         configuration.orderBySection[section] = persistentIDs
         persist()
@@ -62,7 +73,7 @@ final class MenuBarLayoutStore: ObservableObject {
             let leftIndex = order.firstIndex(of: left.persistentID) ?? .max
             let rightIndex = order.firstIndex(of: right.persistentID) ?? .max
             if leftIndex != rightIndex { return leftIndex < rightIndex }
-            return left.frame.minX < right.frame.minX
+            return MenuBarItemRecord.sortsBeforeInDisplayOrder(left, right)
         }
     }
 

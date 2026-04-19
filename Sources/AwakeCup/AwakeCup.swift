@@ -4,6 +4,57 @@ import IOKit.pwr_mgt
 import ServiceManagement
 import SwiftUI
 
+struct LaunchAtLoginLaunchAgentController {
+    let label: String
+    let launchAgentsDir: URL
+    let launchAgentPlistURL: URL
+    let programArguments: [String]
+    var currentUserID: () -> uid_t = { getuid() }
+    var createDirectory: (URL) throws -> Void = { url in
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+    var writeData: (Data, URL) throws -> Void = { data, url in
+        try data.write(to: url, options: .atomic)
+    }
+    var removeItem: (URL) throws -> Void = { url in
+        try FileManager.default.removeItem(at: url)
+    }
+    var runLaunchctl: ([String]) throws -> String
+
+    func enable() throws {
+        try createDirectory(launchAgentsDir)
+
+        let plist: [String: Any] = [
+            "Label": label,
+            "RunAtLoad": true,
+            "KeepAlive": false,
+            "ProcessType": "Interactive",
+            "ProgramArguments": programArguments,
+        ]
+
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try writeData(data, launchAgentPlistURL)
+
+        let uid = String(currentUserID())
+        let domainTarget = "gui/\(uid)"
+
+        _ = try? runLaunchctl(["bootout", "\(domainTarget)/\(label)"])
+        do {
+            _ = try runLaunchctl(["bootstrap", domainTarget, launchAgentPlistURL.path])
+        } catch {
+            try? removeItem(launchAgentPlistURL)
+            throw error
+        }
+    }
+
+    func disable() throws {
+        let uid = String(currentUserID())
+        let domainTarget = "gui/\(uid)"
+        _ = try? runLaunchctl(["bootout", "\(domainTarget)/\(label)"])
+        try? removeItem(launchAgentPlistURL)
+    }
+}
+
 private enum LaunchAtLogin {
     private static let bundleID = "com.awakecup.app"
     private static let launchAgentLabel = "com.awakecup.app.launchatlogin"
@@ -15,6 +66,16 @@ private enum LaunchAtLogin {
 
     private static var launchAgentPlistURL: URL {
         launchAgentsDir.appendingPathComponent("\(launchAgentLabel).plist")
+    }
+
+    private static var launchAgentController: LaunchAtLoginLaunchAgentController {
+        LaunchAtLoginLaunchAgentController(
+            label: launchAgentLabel,
+            launchAgentsDir: launchAgentsDir,
+            launchAgentPlistURL: launchAgentPlistURL,
+            programArguments: programArguments,
+            runLaunchctl: runLaunchctl
+        )
     }
 
     private static var isRunningFromAppBundle: Bool {
@@ -30,10 +91,19 @@ private enum LaunchAtLogin {
     }
 
     static func currentEnabledState() -> Bool {
+        let launchAgentExists = FileManager.default.fileExists(atPath: launchAgentPlistURL.path)
         if #available(macOS 13.0, *), isRunningFromAppBundle {
-            return SMAppService.mainApp.status == .enabled
+            return LaunchAtLoginEnabledState.from(
+                isRunningFromAppBundle: true,
+                appServiceEnabled: SMAppService.mainApp.status == .enabled,
+                launchAgentExists: launchAgentExists
+            )
         }
-        return FileManager.default.fileExists(atPath: launchAgentPlistURL.path)
+        return LaunchAtLoginEnabledState.from(
+            isRunningFromAppBundle: false,
+            appServiceEnabled: false,
+            launchAgentExists: launchAgentExists
+        )
     }
 
     static func setEnabled(_ enabled: Bool) throws {
@@ -44,6 +114,12 @@ private enum LaunchAtLogin {
                     try SMAppService.mainApp.register()
                 } else {
                     try SMAppService.mainApp.unregister()
+                }
+                if LaunchAtLoginFallbackCleanupPolicy.shouldDisableLaunchAgentAfterAppServiceSuccess(
+                    isRunningFromAppBundle: isRunningFromAppBundle,
+                    requestedEnabled: enabled
+                ) {
+                    try disableViaLaunchAgent()
                 }
                 return
             } catch {
@@ -59,32 +135,11 @@ private enum LaunchAtLogin {
     }
 
     private static func enableViaLaunchAgent() throws {
-        try FileManager.default.createDirectory(at: launchAgentsDir, withIntermediateDirectories: true)
-
-        let plist: [String: Any] = [
-            "Label": launchAgentLabel,
-            "RunAtLoad": true,
-            "KeepAlive": false,
-            "ProcessType": "Interactive",
-            "ProgramArguments": programArguments,
-        ]
-
-        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
-        try data.write(to: launchAgentPlistURL, options: .atomic)
-
-        let uid = String(getuid())
-        let domainTarget = "gui/\(uid)"
-
-        // 若已加载，先卸载再加载，避免 bootstrap 报错。
-        _ = try? runLaunchctl(["bootout", "\(domainTarget)/\(launchAgentLabel)"])
-        _ = try runLaunchctl(["bootstrap", domainTarget, launchAgentPlistURL.path])
+        try launchAgentController.enable()
     }
 
     private static func disableViaLaunchAgent() throws {
-        let uid = String(getuid())
-        let domainTarget = "gui/\(uid)"
-        _ = try? runLaunchctl(["bootout", "\(domainTarget)/\(launchAgentLabel)"])
-        try? FileManager.default.removeItem(at: launchAgentPlistURL)
+        try launchAgentController.disable()
     }
 
     @discardableResult
@@ -111,6 +166,100 @@ private enum LaunchAtLogin {
             )
         }
         return out
+    }
+}
+
+enum LaunchAtLoginEnabledState {
+    static func from(
+        isRunningFromAppBundle: Bool,
+        appServiceEnabled: Bool,
+        launchAgentExists: Bool
+    ) -> Bool {
+        if isRunningFromAppBundle {
+            return appServiceEnabled || launchAgentExists
+        }
+        return launchAgentExists
+    }
+}
+
+enum LaunchAtLoginFallbackCleanupPolicy {
+    static func shouldDisableLaunchAgentAfterAppServiceSuccess(
+        isRunningFromAppBundle: Bool,
+        requestedEnabled: Bool
+    ) -> Bool {
+        guard isRunningFromAppBundle else {
+            return false
+        }
+        return true
+    }
+}
+
+struct LaunchAtLoginToggleCoordinator {
+    var displayedValue: Bool = false
+    private(set) var isApplying: Bool = false
+    private var suppressNextApply = false
+
+    mutating func prepareForProgrammaticValueChange(to value: Bool) {
+        displayedValue = value
+        suppressNextApply = true
+    }
+
+    mutating func beginUserInitiatedApplyIfNeeded() -> Bool {
+        if suppressNextApply {
+            suppressNextApply = false
+            return false
+        }
+        guard !isApplying else {
+            return false
+        }
+        isApplying = true
+        return true
+    }
+
+    mutating func finishApply(success: Bool, attemptedValue: Bool) {
+        isApplying = false
+        guard !success else {
+            return
+        }
+        prepareForProgrammaticValueChange(to: !attemptedValue)
+    }
+}
+
+struct ActivationTimeline: Equatable {
+    let activationStartTime: Date?
+    let activeUntil: Date?
+
+    static func from(isActive: Bool, requestedEnd: Date?, now: Date = Date()) -> ActivationTimeline {
+        guard isActive else {
+            return ActivationTimeline(activationStartTime: nil, activeUntil: nil)
+        }
+
+        guard let requestedEnd else {
+            return ActivationTimeline(activationStartTime: nil, activeUntil: nil)
+        }
+
+        return ActivationTimeline(
+            activationStartTime: now,
+            activeUntil: requestedEnd
+        )
+    }
+}
+
+enum ResolvedWakeMode {
+    static func from(
+        isSystemActive: Bool,
+        isDisplayActive: Bool
+    ) -> CaffeineManager.Mode? {
+        switch (isSystemActive, isDisplayActive) {
+        case (true, true):
+            return .systemAndDisplay
+        case (true, false):
+            return .systemOnly
+        case (false, true):
+            return .displayOnly
+        case (false, false):
+            return nil
+        }
     }
 }
 
@@ -247,11 +396,18 @@ final class CaffeineManager: ObservableObject {
             }
         }
 
-        activeMode = (isSystemActive || isDisplayActive) ? mode : nil
-        activeUntil = date
-        activationStartTime = date != nil ? Date() : nil
+        activeMode = ResolvedWakeMode.from(
+            isSystemActive: isSystemActive,
+            isDisplayActive: isDisplayActive
+        )
+        let timeline = ActivationTimeline.from(
+            isActive: isSystemActive || isDisplayActive,
+            requestedEnd: date
+        )
+        activeUntil = timeline.activeUntil
+        activationStartTime = timeline.activationStartTime
 
-        if let date {
+        if let date = timeline.activeUntil {
             let interval = max(0, date.timeIntervalSinceNow)
             stopTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
                 Task { @MainActor in
@@ -339,14 +495,21 @@ struct MenuBarIconState: Equatable {
             )
         }
 
-        let mode: Mode?
-        switch activeMode {
-        case .systemOnly:
+        let mode: Mode
+        switch (isSystemActive, isDisplayActive, activeMode) {
+        case (true, false, _):
             mode = .systemOnly
-        case .displayOnly:
+        case (false, true, _):
             mode = .displayOnly
-        case .systemAndDisplay, .none:
+        case (true, true, _):
             mode = .systemAndDisplay
+        case (false, false, _):
+            return MenuBarIconState(
+                isActive: false,
+                mode: nil,
+                activationStartTime: nil,
+                activeUntil: nil
+            )
         }
 
         return MenuBarIconState(
@@ -576,7 +739,7 @@ struct AwakeCupApp: App {
 
     @State private var selectedMode: CaffeineManager.Mode = .systemAndDisplay
     @AppStorage("launchAtLogin") private var launchAtLogin: Bool = false
-    @State private var isApplyingLaunchAtLogin: Bool = false
+    @State private var launchAtLoginCoordinator = LaunchAtLoginToggleCoordinator()
     @State private var customDurationValue: String = ""
     @State private var customDurationUnit: CustomDurationEntry.Unit = .minutes
     @AppStorage("customDurationHistory") private var historyData: Data = Data()
@@ -660,22 +823,32 @@ struct AwakeCupApp: App {
 
             Divider()
 
-            Toggle("开机自启动", isOn: $launchAtLogin)
-                .disabled(isApplyingLaunchAtLogin)
+            Toggle(
+                "开机自启动",
+                isOn: Binding(
+                    get: { launchAtLoginCoordinator.displayedValue },
+                    set: { newValue in
+                        launchAtLoginCoordinator.displayedValue = newValue
+                        launchAtLogin = newValue
+                    }
+                )
+            )
+                .disabled(launchAtLoginCoordinator.isApplying)
                 .onAppear {
                     // 以实际系统状态为准（避免 UserDefaults 与系统不同步）。
-                    launchAtLogin = LaunchAtLogin.currentEnabledState()
+                    let currentValue = LaunchAtLogin.currentEnabledState()
+                    launchAtLoginCoordinator.prepareForProgrammaticValueChange(to: currentValue)
+                    launchAtLogin = currentValue
                 }
-                .onChange(of: launchAtLogin) { newValue in
-                    guard !isApplyingLaunchAtLogin else { return }
-                    isApplyingLaunchAtLogin = true
+                .onChange(of: launchAtLoginCoordinator.displayedValue) { newValue in
+                    guard launchAtLoginCoordinator.beginUserInitiatedApplyIfNeeded() else { return }
                     Task { @MainActor in
-                        defer { isApplyingLaunchAtLogin = false }
                         do {
                             try LaunchAtLogin.setEnabled(newValue)
+                            launchAtLoginCoordinator.finishApply(success: true, attemptedValue: newValue)
                         } catch {
-                            // 回滚 UI 状态
-                            launchAtLogin.toggle()
+                            launchAtLoginCoordinator.finishApply(success: false, attemptedValue: newValue)
+                            launchAtLogin = launchAtLoginCoordinator.displayedValue
 
                             let alert = NSAlert()
                             alert.alertStyle = .warning
