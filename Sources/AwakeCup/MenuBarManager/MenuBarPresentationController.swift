@@ -106,7 +106,9 @@ final class MenuBarPresentationController: ObservableObject {
     }
 
     private func persist() {
-        let data = try! JSONEncoder().encode(configuration)
+        guard let data = try? JSONEncoder().encode(configuration) else {
+            return
+        }
         persistence.saveData(data, forKey: storageKey)
     }
 }

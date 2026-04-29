@@ -157,22 +157,22 @@ final class MenuBarAXClient: MenuBarAXReading {
             let applicationElement = AXUIElementCreateApplication(processID)
             let notificationResults = [
                 AXObserverAddNotification(
-                observer,
-                applicationElement,
-                kAXCreatedNotification as CFString,
-                callbackToken.toOpaque()
+                    observer,
+                    applicationElement,
+                    kAXCreatedNotification as CFString,
+                    callbackToken.toOpaque()
                 ),
                 AXObserverAddNotification(
-                observer,
-                applicationElement,
-                kAXMovedNotification as CFString,
-                callbackToken.toOpaque()
+                    observer,
+                    applicationElement,
+                    kAXMovedNotification as CFString,
+                    callbackToken.toOpaque()
                 ),
                 AXObserverAddNotification(
-                observer,
-                applicationElement,
-                kAXUIElementDestroyedNotification as CFString,
-                callbackToken.toOpaque()
+                    observer,
+                    applicationElement,
+                    kAXUIElementDestroyedNotification as CFString,
+                    callbackToken.toOpaque()
                 ),
             ]
             guard MenuBarAXObservationRegistrationPolicy.shouldTrackObserver(

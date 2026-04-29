@@ -82,7 +82,7 @@ final class MenuBarManagerViewModelTests: XCTestCase {
         viewModel.refresh()
 
         XCTAssertTrue(viewModel.canManageItems)
-        XCTAssertEqual(viewModel.alwaysVisibleItems.map(\.displayName), ["Visible"])
+        XCTAssertEqual(viewModel.alwaysVisibleItems.map(\.displayName), ["Visible", "Unmanaged"])
         XCTAssertEqual(viewModel.hiddenItems.map(\.displayName), ["Hidden"])
         XCTAssertEqual(viewModel.unmanagedItems.map(\.displayName), ["Unmanaged"])
         XCTAssertEqual(overlay.lastHiddenMaskIDs, [hidden.id])
@@ -181,6 +181,64 @@ final class MenuBarManagerViewModelTests: XCTestCase {
         XCTAssertEqual(overlay.lastPresentedStripIDs, [hidden.id])
     }
 
+    func testRevealHiddenItemsButtonIsHiddenForPanelMode() {
+        let permission = AccessibilityPermissionController(checker: StubAccessibilityTrustChecker(responses: [true, true]))
+        let hidden = makeRecord(
+            bundleIdentifier: "com.example.hidden",
+            processID: 2,
+            title: "Hidden",
+            originX: 40,
+            actionNames: ["AXPress"]
+        )
+        let inventory = MenuBarInventoryService(reader: StubMenuBarAXReader(records: [hidden]))
+        let layout = MenuBarLayoutStore(persistence: InMemoryMenuBarLayoutPersistence())
+        layout.assign(.hidden, toPersistentID: hidden.persistentID)
+        let presentation = MenuBarPresentationController()
+        presentation.configuration.preferredRevealMode = .panel
+        let overlay = StubMenuBarOverlayController()
+        let viewModel = MenuBarManagerViewModel(
+            permission: permission,
+            inventory: inventory,
+            layout: layout,
+            presentation: presentation,
+            overlay: overlay
+        )
+
+        viewModel.refresh()
+
+        XCTAssertFalse(viewModel.shouldShowRevealHiddenItemsButton)
+        XCTAssertFalse(viewModel.canRevealHiddenItemsInPreferredMode)
+    }
+
+    func testRevealHiddenItemsButtonIsDisabledWhenExpandedStripCannotBePresented() {
+        let permission = AccessibilityPermissionController(checker: StubAccessibilityTrustChecker(responses: [true, true]))
+        let hidden = makeRecord(
+            bundleIdentifier: "com.example.hidden",
+            processID: 2,
+            title: "Hidden",
+            originX: 40,
+            actionNames: []
+        )
+        let inventory = MenuBarInventoryService(reader: StubMenuBarAXReader(records: [hidden]))
+        let layout = MenuBarLayoutStore(persistence: InMemoryMenuBarLayoutPersistence())
+        layout.assign(.hidden, toPersistentID: hidden.persistentID)
+        let presentation = MenuBarPresentationController()
+        presentation.configuration.preferredRevealMode = .expandedStrip
+        let overlay = StubMenuBarOverlayController()
+        let viewModel = MenuBarManagerViewModel(
+            permission: permission,
+            inventory: inventory,
+            layout: layout,
+            presentation: presentation,
+            overlay: overlay
+        )
+
+        viewModel.refresh()
+
+        XCTAssertTrue(viewModel.shouldShowRevealHiddenItemsButton)
+        XCTAssertFalse(viewModel.canRevealHiddenItemsInPreferredMode)
+    }
+
     func testExpandedStripForwardsPressedItemThroughViewModel() {
         let permission = AccessibilityPermissionController(checker: StubAccessibilityTrustChecker(responses: [true, true]))
         let hidden = makeRecord(
@@ -263,6 +321,36 @@ final class MenuBarManagerViewModelTests: XCTestCase {
             frame: nil,
             actionNames: ["AXPress"]
         ))
+        let inventory = MenuBarInventoryService(reader: StubMenuBarAXReader(records: [hidden]))
+        let layout = MenuBarLayoutStore(persistence: InMemoryMenuBarLayoutPersistence())
+        layout.assign(.hidden, toPersistentID: hidden.persistentID)
+        let presentation = MenuBarPresentationController()
+        presentation.configuration.preferredRevealMode = .expandedStrip
+        let overlay = StubMenuBarOverlayController()
+        let viewModel = MenuBarManagerViewModel(
+            permission: permission,
+            inventory: inventory,
+            layout: layout,
+            presentation: presentation,
+            overlay: overlay
+        )
+
+        viewModel.refresh()
+        viewModel.showHiddenItems()
+
+        XCTAssertEqual(presentation.state.activeSurface, .panel)
+        XCTAssertEqual(overlay.lastPresentedStripIDs, [])
+    }
+
+    func testShowHiddenItemsFallsBackToPanelWhenHiddenItemCannotBePressed() {
+        let permission = AccessibilityPermissionController(checker: StubAccessibilityTrustChecker(responses: [true, true]))
+        let hidden = makeRecord(
+            bundleIdentifier: "com.example.hidden",
+            processID: 2,
+            title: "Hidden",
+            originX: 40,
+            actionNames: []
+        )
         let inventory = MenuBarInventoryService(reader: StubMenuBarAXReader(records: [hidden]))
         let layout = MenuBarLayoutStore(persistence: InMemoryMenuBarLayoutPersistence())
         layout.assign(.hidden, toPersistentID: hidden.persistentID)
@@ -404,7 +492,7 @@ final class MenuBarManagerViewModelTests: XCTestCase {
             processID: 2,
             title: "Clock",
             originX: 40,
-            actionNames: ["AXPress"]
+            actionNames: []
         )
         let inventory = MenuBarInventoryService(reader: StubMenuBarAXReader(records: [appItem, externalItem]))
         let layout = MenuBarLayoutStore(persistence: InMemoryMenuBarLayoutPersistence())

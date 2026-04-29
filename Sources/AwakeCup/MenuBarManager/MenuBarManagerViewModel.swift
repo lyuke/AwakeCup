@@ -66,10 +66,10 @@ final class MenuBarManagerViewModel: ObservableObject {
         inventory.refresh()
         inventoryErrorMessage = inventory.lastRefreshError
 
-        let manageableItems = inventory.records.filter(\.isManageable)
-        alwaysVisibleItems = layout.orderedItems(inventory: manageableItems, section: .alwaysVisible)
-        hiddenItems = layout.orderedItems(inventory: manageableItems, section: .hidden)
-        unmanagedItems = inventory.records.filter(\.isUnmanaged)
+        let inventoryItems = inventory.records
+        alwaysVisibleItems = layout.orderedItems(inventory: inventoryItems, section: .alwaysVisible)
+        hiddenItems = layout.orderedItems(inventory: inventoryItems, section: .hidden)
+        unmanagedItems = alwaysVisibleItems.filter(\.isUnmanaged)
 
         if hiddenItems.allSatisfy(\.hasKnownFrame) {
             overlay.updateHiddenMask(for: hiddenItems)
@@ -116,7 +116,7 @@ final class MenuBarManagerViewModel: ObservableObject {
     }
 
     func showHiddenItems() {
-        presentation.showPreferred(canPresentExpandedStrip: hiddenItems.allSatisfy(\.hasKnownFrame) && !hiddenItems.isEmpty)
+        presentation.showPreferred(canPresentExpandedStrip: canPresentExpandedStrip)
         syncExpandedStripVisibility()
     }
 
@@ -139,6 +139,18 @@ final class MenuBarManagerViewModel: ObservableObject {
         }
     }
 
+    var shouldShowRevealHiddenItemsButton: Bool {
+        preferredRevealMode == .expandedStrip
+    }
+
+    var canRevealHiddenItemsInPreferredMode: Bool {
+        shouldShowRevealHiddenItemsButton && canPresentExpandedStrip
+    }
+
+    private var canPresentExpandedStrip: Bool {
+        !hiddenItems.isEmpty && hiddenItems.allSatisfy(\.hasKnownFrame) && hiddenItems.allSatisfy(\.isManageable)
+    }
+
     private func syncExpandedStripVisibility(using state: MenuBarPresentationState? = nil) {
         let presentationState = state ?? presentation.state
 
@@ -146,6 +158,12 @@ final class MenuBarManagerViewModel: ObservableObject {
             if presentationState.activeSurface == .expandedStrip, hiddenItems.isEmpty {
                 presentation.dismiss()
             }
+            overlay.dismissExpandedStrip()
+            return
+        }
+
+        guard canPresentExpandedStrip else {
+            presentation.dismiss()
             overlay.dismissExpandedStrip()
             return
         }
@@ -160,21 +178,5 @@ final class MenuBarManagerViewModel: ObservableObject {
         if inventoryErrorMessage != nil {
             presentation.dismiss()
         }
-    }
-}
-
-private extension MenuBarItemRecord {
-    var isManageable: Bool {
-        if case .manageable = manageability {
-            return true
-        }
-        return false
-    }
-
-    var isUnmanaged: Bool {
-        if case .unmanaged = manageability {
-            return true
-        }
-        return false
     }
 }

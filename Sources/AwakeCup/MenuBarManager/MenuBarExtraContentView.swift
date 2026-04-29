@@ -51,16 +51,18 @@ struct MenuBarExtraContentView<Controls: View>: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(manager.hiddenItems) { item in
-                        Button(item.displayName) {
+                        HiddenItemQuickAction(item: item) {
                             manager.press(item)
                         }
                     }
                 }
 
-                Button("显示隐藏项") {
-                    manager.showHiddenItems()
+                if manager.shouldShowRevealHiddenItemsButton {
+                    Button("展开隐藏项") {
+                        manager.showHiddenItems()
+                    }
+                    .disabled(!manager.canRevealHiddenItemsInPreferredMode)
                 }
-                .disabled(manager.hiddenItems.isEmpty)
 
                 Button("隐藏其他顶部图标") {
                     manager.hideOtherVisibleItems()
@@ -90,6 +92,31 @@ struct MenuBarExtraContentView<Controls: View>: View {
                     openWindow(id: menuBarManagerSettingsWindowID)
                 }
             }
+        }
+    }
+}
+
+private struct HiddenItemQuickAction: View {
+    let item: MenuBarItemRecord
+    let press: () -> Void
+
+    var body: some View {
+        if item.isManageable {
+            Button(action: press) {
+                Text(item.displayName)
+                    .lineLimit(1)
+            }
+        } else {
+            HStack(spacing: 8) {
+                Text(item.displayName)
+                    .lineLimit(1)
+                Spacer()
+                Text("不可点击")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .help(item.unmanagedReason ?? "该菜单栏项目缺少可执行的辅助功能操作。")
         }
     }
 }

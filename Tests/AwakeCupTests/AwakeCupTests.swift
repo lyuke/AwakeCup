@@ -118,8 +118,7 @@ final class AwakeCupTests: XCTestCase {
     func testLaunchAtLoginFallbackCleanupRunsWhenDisablingFromAppBundle() {
         XCTAssertTrue(
             LaunchAtLoginFallbackCleanupPolicy.shouldDisableLaunchAgentAfterAppServiceSuccess(
-                isRunningFromAppBundle: true,
-                requestedEnabled: false
+                isRunningFromAppBundle: true
             )
         )
     }
@@ -127,8 +126,7 @@ final class AwakeCupTests: XCTestCase {
     func testLaunchAtLoginFallbackCleanupRunsWhenEnablingFromAppBundle() {
         XCTAssertTrue(
             LaunchAtLoginFallbackCleanupPolicy.shouldDisableLaunchAgentAfterAppServiceSuccess(
-                isRunningFromAppBundle: true,
-                requestedEnabled: true
+                isRunningFromAppBundle: true
             )
         )
     }
@@ -136,8 +134,7 @@ final class AwakeCupTests: XCTestCase {
     func testLaunchAtLoginFallbackCleanupDoesNotRunOutsideAppBundle() {
         XCTAssertFalse(
             LaunchAtLoginFallbackCleanupPolicy.shouldDisableLaunchAgentAfterAppServiceSuccess(
-                isRunningFromAppBundle: false,
-                requestedEnabled: true
+                isRunningFromAppBundle: false
             )
         )
     }

@@ -39,7 +39,7 @@ struct MenuBarManagerSettingsView: View {
                 }
                 .disabled(!viewModel.canHideOtherVisibleItems)
 
-                Text("将除 AwakeCup 外当前可管理的顶部图标批量移到隐藏项。")
+                Text("将除 AwakeCup 外当前顶部图标批量移到隐藏项。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -116,7 +116,14 @@ private struct ManagedItemRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.displayName)
+                HStack(spacing: 6) {
+                    Text(item.displayName)
+                    if item.isUnmanaged {
+                        Label("不可点击", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Text(item.bundleIdentifier)
                     .font(.caption)
                     .foregroundStyle(.secondary)

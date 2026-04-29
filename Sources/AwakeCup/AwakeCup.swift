@@ -116,8 +116,7 @@ private enum LaunchAtLogin {
                     try SMAppService.mainApp.unregister()
                 }
                 if LaunchAtLoginFallbackCleanupPolicy.shouldDisableLaunchAgentAfterAppServiceSuccess(
-                    isRunningFromAppBundle: isRunningFromAppBundle,
-                    requestedEnabled: enabled
+                    isRunningFromAppBundle: isRunningFromAppBundle
                 ) {
                     try disableViaLaunchAgent()
                 }
@@ -184,8 +183,7 @@ enum LaunchAtLoginEnabledState {
 
 enum LaunchAtLoginFallbackCleanupPolicy {
     static func shouldDisableLaunchAgentAfterAppServiceSuccess(
-        isRunningFromAppBundle: Bool,
-        requestedEnabled: Bool
+        isRunningFromAppBundle: Bool
     ) -> Bool {
         guard isRunningFromAppBundle else {
             return false
@@ -363,7 +361,7 @@ final class CaffeineManager: ObservableObject {
         }
 
         if mode.needsSystem && !isSystemActive {
-        let reason = "AwakeCup: Prevent idle system sleep" as CFString
+            let reason = "AwakeCup: Prevent idle system sleep" as CFString
             let type = kIOPMAssertionTypePreventUserIdleSystemSleep as CFString
             let result = IOPMAssertionCreateWithName(
                 type,
@@ -418,14 +416,44 @@ final class CaffeineManager: ObservableObject {
     }
 }
 
+enum TopMenuBarAutoHide {
+    static let storageKey = "autoHideTopMenuBar"
+
+    static func options(
+        from currentOptions: NSApplication.PresentationOptions,
+        enabled: Bool
+    ) -> NSApplication.PresentationOptions {
+        var options = currentOptions
+        options.remove(.hideMenuBar)
+
+        if enabled {
+            options.insert(.autoHideMenuBar)
+        } else {
+            options.remove(.autoHideMenuBar)
+        }
+
+        return options
+    }
+
+    @MainActor
+    static func apply(_ enabled: Bool, application: NSApplication = .shared) {
+        application.presentationOptions = options(
+            from: application.presentationOptions,
+            enabled: enabled
+        )
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 作为菜单栏应用运行：不显示 Dock 图标，不显示主窗口。
         NSApp.setActivationPolicy(.accessory)
+        TopMenuBarAutoHide.apply(UserDefaults.standard.bool(forKey: TopMenuBarAutoHide.storageKey))
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         CaffeineManager.shared.deactivate()
+        TopMenuBarAutoHide.apply(false)
     }
 }
 
@@ -731,19 +759,15 @@ private func menuBarHelpText(system: Bool, display: Bool, activeUntil: Date?) ->
 struct AwakeCupApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var caffeine = CaffeineManager.shared
-    @StateObject private var permissionController: AccessibilityPermissionController
-    @StateObject private var inventoryService: MenuBarInventoryService
-    @StateObject private var layoutStore: MenuBarLayoutStore
-    @StateObject private var presentationController: MenuBarPresentationController
     @StateObject private var menuBarManager: MenuBarManagerViewModel
 
     @State private var selectedMode: CaffeineManager.Mode = .systemAndDisplay
     @AppStorage("launchAtLogin") private var launchAtLogin: Bool = false
+    @AppStorage(TopMenuBarAutoHide.storageKey) private var autoHideTopMenuBar: Bool = false
     @State private var launchAtLoginCoordinator = LaunchAtLoginToggleCoordinator()
     @State private var customDurationValue: String = ""
     @State private var customDurationUnit: CustomDurationEntry.Unit = .minutes
     @AppStorage("customDurationHistory") private var historyData: Data = Data()
-    private let overlayController: MenuBarOverlayController
 
     init() {
         let permission = AccessibilityPermissionController()
@@ -752,10 +776,6 @@ struct AwakeCupApp: App {
         let presentation = MenuBarPresentationController()
         let overlay = MenuBarOverlayController()
 
-        _permissionController = StateObject(wrappedValue: permission)
-        _inventoryService = StateObject(wrappedValue: inventory)
-        _layoutStore = StateObject(wrappedValue: layout)
-        _presentationController = StateObject(wrappedValue: presentation)
         _menuBarManager = StateObject(
             wrappedValue: MenuBarManagerViewModel(
                 permission: permission,
@@ -765,7 +785,6 @@ struct AwakeCupApp: App {
                 overlay: overlay
             )
         )
-        overlayController = overlay
     }
 
     private var history: [CustomDurationEntry] {
@@ -804,10 +823,35 @@ struct AwakeCupApp: App {
         caffeine.activate(mode: selectedMode, for: safeEntry.seconds)
     }
 
+    private func activate(_ option: DurationOption) {
+        if let seconds = option.seconds {
+            caffeine.activate(mode: selectedMode, for: seconds)
+        } else {
+            caffeine.activateIndefinitely(mode: selectedMode)
+        }
+    }
+
     private var currentControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
+            wakeStatusSection
+            Divider()
+            appOptionsSection
+            Divider()
+            wakeTargetSection
+            Divider()
+            durationSection
+            Divider()
+
+            Button("退出") { NSApp.terminate(nil) }
+                .keyboardShortcut("q")
+        }
+    }
+
+    private var wakeStatusSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(modeStatusText(system: caffeine.isSystemActive, display: caffeine.isDisplayActive))
+                    .font(.headline)
                 Spacer()
                 if caffeine.isSystemActive || caffeine.isDisplayActive {
                     Button("停止") { caffeine.deactivate() }
@@ -820,9 +864,11 @@ struct AwakeCupApp: App {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
 
-            Divider()
-
+    private var appOptionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
             Toggle(
                 "开机自启动",
                 isOn: Binding(
@@ -860,6 +906,22 @@ struct AwakeCupApp: App {
                     }
                 }
 
+            Toggle("自动隐藏顶部菜单栏", isOn: $autoHideTopMenuBar)
+                .onAppear {
+                    TopMenuBarAutoHide.apply(autoHideTopMenuBar)
+                }
+                .onChange(of: autoHideTopMenuBar) { newValue in
+                    TopMenuBarAutoHide.apply(newValue)
+                }
+
+            Text("鼠标移到屏幕顶端时，顶部菜单栏会临时显示。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var wakeTargetSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
             Text("保持目标")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -871,7 +933,11 @@ struct AwakeCupApp: App {
             }
             .labelsHidden()
             .pickerStyle(.menu)
+        }
+    }
 
+    private var durationSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
             Text("开始保持唤醒")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -923,23 +989,12 @@ struct AwakeCupApp: App {
                 }
             }
 
-            Divider()
-
             ForEach(DurationOption.allCases) { option in
                 Button(option.title) {
-                    if let seconds = option.seconds {
-                        caffeine.activate(mode: selectedMode, for: seconds)
-                    } else {
-                        caffeine.activateIndefinitely(mode: selectedMode)
-                    }
+                    activate(option)
                 }
                 .disabled((caffeine.isSystemActive || caffeine.isDisplayActive) && option == .indefinite && caffeine.activeUntil == nil && caffeine.activeMode == selectedMode)
             }
-
-            Divider()
-
-            Button("退出") { NSApp.terminate(nil) }
-                .keyboardShortcut("q")
         }
     }
 

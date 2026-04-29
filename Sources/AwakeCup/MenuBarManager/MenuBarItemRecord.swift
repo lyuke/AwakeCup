@@ -117,12 +117,32 @@ struct MenuBarItemRecord: Identifiable, Codable, Equatable {
     }
 
     private static func encodeIdentityComponents<T: Encodable>(_ value: T) -> String {
-        let data = try! JSONEncoder().encode(value)
+        guard let data = try? JSONEncoder().encode(value) else {
+            return String(describing: value)
+        }
         return String(decoding: data, as: UTF8.self)
     }
 }
 
 extension MenuBarItemRecord {
+    var isManageable: Bool {
+        if case .manageable = manageability {
+            return true
+        }
+        return false
+    }
+
+    var isUnmanaged: Bool {
+        !isManageable
+    }
+
+    var unmanagedReason: String? {
+        if case let .unmanaged(reason) = manageability {
+            return reason
+        }
+        return nil
+    }
+
     static func sortsBeforeInDisplayOrder(_ left: MenuBarItemRecord, _ right: MenuBarItemRecord) -> Bool {
         switch (left.hasKnownFrame, right.hasKnownFrame) {
         case (true, false):

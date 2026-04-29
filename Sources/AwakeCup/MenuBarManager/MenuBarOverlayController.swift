@@ -15,24 +15,32 @@ protocol MenuBarOverlayControlling: AnyObject {
 
 @MainActor
 final class MenuBarOverlayController: MenuBarOverlayControlling {
-    private var hiddenMaskWindow: NSWindow?
+    private let overlayWindowLevel = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+    private var hiddenMaskWindows: [NSWindow] = []
     private var expandedStripPanel: NSPanel?
 
+    deinit {
+        let hiddenMaskWindows = hiddenMaskWindows
+        let expandedStripPanel = expandedStripPanel
+        Task { @MainActor in
+            hiddenMaskWindows.forEach { $0.orderOut(nil) }
+            expandedStripPanel?.orderOut(nil)
+        }
+    }
+
     func updateHiddenMask(for hiddenItems: [MenuBarItemRecord]) {
-        guard let frame = hiddenItems.boundingFrame else {
+        let frames = hiddenItems.hiddenMaskFrames
+        guard !frames.isEmpty else {
             hideHiddenMask()
             return
         }
 
-        let window = hiddenMaskWindow ?? makeHiddenMaskWindow(frame: frame)
-        window.setFrame(frame, display: true)
-        window.contentView = makeHiddenMaskContentView(bounds: contentBounds(for: frame))
-        window.orderFrontRegardless()
-        hiddenMaskWindow = window
+        syncHiddenMaskWindows(to: frames)
     }
 
     func hideHiddenMask() {
-        hiddenMaskWindow?.orderOut(nil)
+        hiddenMaskWindows.forEach { $0.orderOut(nil) }
+        hiddenMaskWindows.removeAll(keepingCapacity: true)
     }
 
     func presentExpandedStrip(
@@ -66,11 +74,11 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
             backing: .buffered,
             defer: false
         )
-        window.level = .statusBar
-        window.isOpaque = false
-        window.backgroundColor = .clear
+        window.level = overlayWindowLevel
+        window.isOpaque = true
+        window.backgroundColor = .windowBackgroundColor
         window.hasShadow = false
-        window.ignoresMouseEvents = true
+        window.ignoresMouseEvents = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.contentView = makeHiddenMaskContentView(bounds: contentBounds(for: frame))
         return window
@@ -83,7 +91,7 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
             backing: .buffered,
             defer: false
         )
-        panel.level = .statusBar
+        panel.level = overlayWindowLevel
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
@@ -98,15 +106,27 @@ final class MenuBarOverlayController: MenuBarOverlayControlling {
     }
 
     private func makeHiddenMaskContentView(bounds: CGRect) -> NSView {
-        let materialView = NSVisualEffectView(frame: bounds)
-        materialView.autoresizingMask = [.width, .height]
-        materialView.material = .underWindowBackground
-        materialView.blendingMode = .withinWindow
-        materialView.state = .active
-        materialView.wantsLayer = true
-        materialView.layer?.cornerRadius = 8
-        materialView.layer?.masksToBounds = true
-        return materialView
+        let view = NSView(frame: bounds)
+        view.autoresizingMask = [.width, .height]
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        return view
+    }
+
+    private func syncHiddenMaskWindows(to frames: [CGRect]) {
+        while hiddenMaskWindows.count < frames.count {
+            hiddenMaskWindows.append(makeHiddenMaskWindow(frame: frames[hiddenMaskWindows.count]))
+        }
+
+        while hiddenMaskWindows.count > frames.count {
+            hiddenMaskWindows.removeLast().orderOut(nil)
+        }
+
+        for (window, frame) in zip(hiddenMaskWindows, frames) {
+            window.setFrame(frame, display: true)
+            window.contentView = makeHiddenMaskContentView(bounds: contentBounds(for: frame))
+            window.orderFrontRegardless()
+        }
     }
 
     private func makeExpandedStripContentView(
@@ -140,6 +160,15 @@ private extension Array where Element == MenuBarItemRecord {
             frame = frame.union(item.frame)
         }
         return frame
+    }
+
+    var hiddenMaskFrames: [CGRect] {
+        compactMap { item in
+            guard item.hasKnownFrame else {
+                return nil
+            }
+            return item.frame.integral
+        }
     }
 }
 
