@@ -2,6 +2,215 @@ import XCTest
 @testable import AwakeCup
 
 final class AwakeCupTests: XCTestCase {
+    func testLaunchAgentControllerRemovesPlistWhenBootstrapFails() throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let launchAgentsDir = tempDirectory.appendingPathComponent("LaunchAgents", isDirectory: true)
+        let plistURL = launchAgentsDir.appendingPathComponent("com.awakecup.test.plist")
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        var commands: [[String]] = []
+        let controller = LaunchAtLoginLaunchAgentController(
+            label: "com.awakecup.test",
+            launchAgentsDir: launchAgentsDir,
+            launchAgentPlistURL: plistURL,
+            programArguments: ["/usr/bin/true"],
+            currentUserID: { 501 },
+            runLaunchctl: { arguments in
+                commands.append(arguments)
+                if arguments.first == "bootstrap" {
+                    throw NSError(domain: "LaunchAgentTest", code: 1)
+                }
+                return ""
+            }
+        )
+
+        XCTAssertThrowsError(try controller.enable())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: plistURL.path))
+        XCTAssertEqual(commands.map(\.first), ["bootout", "bootstrap"])
+    }
+
+    func testLaunchAgentControllerKeepsPlistWhenBootstrapSucceeds() throws {
+        let tempDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let launchAgentsDir = tempDirectory.appendingPathComponent("LaunchAgents", isDirectory: true)
+        let plistURL = launchAgentsDir.appendingPathComponent("com.awakecup.test.plist")
+        defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+        let controller = LaunchAtLoginLaunchAgentController(
+            label: "com.awakecup.test",
+            launchAgentsDir: launchAgentsDir,
+            launchAgentPlistURL: plistURL,
+            programArguments: ["/usr/bin/true"],
+            currentUserID: { 501 },
+            runLaunchctl: { _ in "" }
+        )
+
+        try controller.enable()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: plistURL.path))
+    }
+
+    // MARK: - LaunchAtLogin Toggle Flow Tests
+
+    func testLaunchAtLoginSyncSuppressesNextProgrammaticChange() {
+        var coordinator = LaunchAtLoginToggleCoordinator()
+
+        coordinator.prepareForProgrammaticValueChange(to: true)
+
+        XCTAssertEqual(coordinator.displayedValue, true)
+        XCTAssertFalse(coordinator.beginUserInitiatedApplyIfNeeded())
+        XCTAssertFalse(coordinator.isApplying)
+    }
+
+    func testLaunchAtLoginBeginUserApplySetsApplyingState() {
+        var coordinator = LaunchAtLoginToggleCoordinator()
+        coordinator.displayedValue = false
+        coordinator.displayedValue = true
+
+        XCTAssertTrue(coordinator.beginUserInitiatedApplyIfNeeded())
+        XCTAssertTrue(coordinator.isApplying)
+    }
+
+    func testLaunchAtLoginFailureRevertsValueAndSuppressesRollbackChange() {
+        var coordinator = LaunchAtLoginToggleCoordinator()
+        coordinator.displayedValue = false
+        coordinator.displayedValue = true
+        XCTAssertTrue(coordinator.beginUserInitiatedApplyIfNeeded())
+
+        coordinator.finishApply(success: false, attemptedValue: true)
+
+        XCTAssertEqual(coordinator.displayedValue, false)
+        XCTAssertFalse(coordinator.isApplying)
+        XCTAssertFalse(coordinator.beginUserInitiatedApplyIfNeeded())
+    }
+
+    func testLaunchAtLoginEnabledStateUsesLaunchAgentFallbackWhenAppServiceIsDisabled() {
+        let status = LaunchAtLoginEnabledState.from(
+            isRunningFromAppBundle: true,
+            appServiceEnabled: false,
+            launchAgentExists: true
+        )
+
+        XCTAssertTrue(status)
+    }
+
+    func testLaunchAtLoginEnabledStateUsesAppServiceWhenAvailable() {
+        let status = LaunchAtLoginEnabledState.from(
+            isRunningFromAppBundle: true,
+            appServiceEnabled: true,
+            launchAgentExists: false
+        )
+
+        XCTAssertTrue(status)
+    }
+
+    func testLaunchAtLoginEnabledStateUsesLaunchAgentOutsideAppBundle() {
+        let status = LaunchAtLoginEnabledState.from(
+            isRunningFromAppBundle: false,
+            appServiceEnabled: false,
+            launchAgentExists: true
+        )
+
+        XCTAssertTrue(status)
+    }
+
+    func testLaunchAtLoginFallbackCleanupRunsWhenDisablingFromAppBundle() {
+        XCTAssertTrue(
+            LaunchAtLoginFallbackCleanupPolicy.shouldDisableLaunchAgentAfterAppServiceSuccess(
+                isRunningFromAppBundle: true
+            )
+        )
+    }
+
+    func testLaunchAtLoginFallbackCleanupRunsWhenEnablingFromAppBundle() {
+        XCTAssertTrue(
+            LaunchAtLoginFallbackCleanupPolicy.shouldDisableLaunchAgentAfterAppServiceSuccess(
+                isRunningFromAppBundle: true
+            )
+        )
+    }
+
+    func testLaunchAtLoginFallbackCleanupDoesNotRunOutsideAppBundle() {
+        XCTAssertFalse(
+            LaunchAtLoginFallbackCleanupPolicy.shouldDisableLaunchAgentAfterAppServiceSuccess(
+                isRunningFromAppBundle: false
+            )
+        )
+    }
+
+    // MARK: - Activation Timeline Tests
+
+    func testActivationTimelineClearsCountdownMetadataWhenNothingIsActive() {
+        let now = Date(timeIntervalSince1970: 100)
+        let requestedEnd = now.addingTimeInterval(3600)
+
+        let timeline = ActivationTimeline.from(
+            isActive: false,
+            requestedEnd: requestedEnd,
+            now: now
+        )
+
+        XCTAssertNil(timeline.activationStartTime)
+        XCTAssertNil(timeline.activeUntil)
+    }
+
+    func testActivationTimelineStartsCountdownWhenActivationSucceeds() {
+        let now = Date(timeIntervalSince1970: 100)
+        let requestedEnd = now.addingTimeInterval(3600)
+
+        let timeline = ActivationTimeline.from(
+            isActive: true,
+            requestedEnd: requestedEnd,
+            now: now
+        )
+
+        XCTAssertEqual(timeline.activationStartTime, now)
+        XCTAssertEqual(timeline.activeUntil, requestedEnd)
+    }
+
+    func testActivationTimelineOmitsCountdownForIndefiniteActivation() {
+        let now = Date(timeIntervalSince1970: 100)
+
+        let timeline = ActivationTimeline.from(
+            isActive: true,
+            requestedEnd: nil,
+            now: now
+        )
+
+        XCTAssertNil(timeline.activationStartTime)
+        XCTAssertNil(timeline.activeUntil)
+    }
+
+    // MARK: - Resolved Wake Mode Tests
+
+    func testResolvedWakeModeUsesSystemOnlyForPartialActivation() {
+        let mode = ResolvedWakeMode.from(
+            isSystemActive: true,
+            isDisplayActive: false
+        )
+
+        XCTAssertEqual(mode, .systemOnly)
+    }
+
+    func testResolvedWakeModeUsesDisplayOnlyForPartialActivation() {
+        let mode = ResolvedWakeMode.from(
+            isSystemActive: false,
+            isDisplayActive: true
+        )
+
+        XCTAssertEqual(mode, .displayOnly)
+    }
+
+    func testResolvedWakeModeUsesCombinedModeWhenBothAssertionsAreActive() {
+        let mode = ResolvedWakeMode.from(
+            isSystemActive: true,
+            isDisplayActive: true
+        )
+
+        XCTAssertEqual(mode, .systemAndDisplay)
+    }
+
     // MARK: - MenuBarIconState Tests
 
     func testIconStateInactive() {
@@ -49,6 +258,19 @@ final class AwakeCupTests: XCTestCase {
         XCTAssertFalse(state.hasCountdown)
     }
 
+    func testStateFromUsesActualFlagsWhenRequestedModeOverstatesSystemOnly() {
+        let state = MenuBarIconState.from(
+            isSystemActive: true,
+            isDisplayActive: false,
+            activeMode: .systemAndDisplay,
+            activationStartTime: nil,
+            activeUntil: nil
+        )
+
+        XCTAssertTrue(state.isActive)
+        XCTAssertEqual(state.mode, .systemOnly)
+    }
+
     func testStateFromDisplayOnly() {
         let state = MenuBarIconState.from(
             isSystemActive: false,
@@ -57,6 +279,19 @@ final class AwakeCupTests: XCTestCase {
             activationStartTime: nil,
             activeUntil: nil
         )
+        XCTAssertTrue(state.isActive)
+        XCTAssertEqual(state.mode, .displayOnly)
+    }
+
+    func testStateFromUsesActualFlagsWhenRequestedModeOverstatesDisplayOnly() {
+        let state = MenuBarIconState.from(
+            isSystemActive: false,
+            isDisplayActive: true,
+            activeMode: .systemAndDisplay,
+            activationStartTime: nil,
+            activeUntil: nil
+        )
+
         XCTAssertTrue(state.isActive)
         XCTAssertEqual(state.mode, .displayOnly)
     }
