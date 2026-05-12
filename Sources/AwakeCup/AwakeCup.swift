@@ -416,44 +416,14 @@ final class CaffeineManager: ObservableObject {
     }
 }
 
-enum TopMenuBarAutoHide {
-    static let storageKey = "autoHideTopMenuBar"
-
-    static func options(
-        from currentOptions: NSApplication.PresentationOptions,
-        enabled: Bool
-    ) -> NSApplication.PresentationOptions {
-        var options = currentOptions
-        options.remove(.hideMenuBar)
-
-        if enabled {
-            options.insert(.autoHideMenuBar)
-        } else {
-            options.remove(.autoHideMenuBar)
-        }
-
-        return options
-    }
-
-    @MainActor
-    static func apply(_ enabled: Bool, application: NSApplication = .shared) {
-        application.presentationOptions = options(
-            from: application.presentationOptions,
-            enabled: enabled
-        )
-    }
-}
-
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 作为菜单栏应用运行：不显示 Dock 图标，不显示主窗口。
         NSApp.setActivationPolicy(.accessory)
-        TopMenuBarAutoHide.apply(UserDefaults.standard.bool(forKey: TopMenuBarAutoHide.storageKey))
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         CaffeineManager.shared.deactivate()
-        TopMenuBarAutoHide.apply(false)
     }
 }
 
@@ -759,33 +729,13 @@ private func menuBarHelpText(system: Bool, display: Bool, activeUntil: Date?) ->
 struct AwakeCupApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var caffeine = CaffeineManager.shared
-    @StateObject private var menuBarManager: MenuBarManagerViewModel
 
     @State private var selectedMode: CaffeineManager.Mode = .systemAndDisplay
     @AppStorage("launchAtLogin") private var launchAtLogin: Bool = false
-    @AppStorage(TopMenuBarAutoHide.storageKey) private var autoHideTopMenuBar: Bool = false
     @State private var launchAtLoginCoordinator = LaunchAtLoginToggleCoordinator()
     @State private var customDurationValue: String = ""
     @State private var customDurationUnit: CustomDurationEntry.Unit = .minutes
     @AppStorage("customDurationHistory") private var historyData: Data = Data()
-
-    init() {
-        let permission = AccessibilityPermissionController()
-        let inventory = MenuBarInventoryService()
-        let layout = MenuBarLayoutStore()
-        let presentation = MenuBarPresentationController()
-        let overlay = MenuBarOverlayController()
-
-        _menuBarManager = StateObject(
-            wrappedValue: MenuBarManagerViewModel(
-                permission: permission,
-                inventory: inventory,
-                layout: layout,
-                presentation: presentation,
-                overlay: overlay
-            )
-        )
-    }
 
     private var history: [CustomDurationEntry] {
         (try? JSONDecoder().decode([CustomDurationEntry].self, from: historyData)) ?? []
@@ -906,17 +856,6 @@ struct AwakeCupApp: App {
                     }
                 }
 
-            Toggle("自动隐藏顶部菜单栏", isOn: $autoHideTopMenuBar)
-                .onAppear {
-                    TopMenuBarAutoHide.apply(autoHideTopMenuBar)
-                }
-                .onChange(of: autoHideTopMenuBar) { newValue in
-                    TopMenuBarAutoHide.apply(newValue)
-                }
-
-            Text("鼠标移到屏幕顶端时，顶部菜单栏会临时显示。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -999,28 +938,29 @@ struct AwakeCupApp: App {
     }
 
     var body: some Scene {
+        // 使用默认 .menu 样式以兼容 macOS 13。
+        // .window 样式（macOS 14+）允许 TextField 等复杂控件，但 SceneBuilder 不支持
+        // 运行时条件分支；同时 MenuBarExtraStyle 是协议类型，无法通过计算属性桥接。
+        // 未来可通过 Xcode Previews / #if 在编译期切换。
         MenuBarExtra {
-            MenuBarExtraContentView(manager: menuBarManager) {
-                currentControls
-            }
+            currentControls
         } label: {
-            Image(nsImage: MenuBarIcon.makeImage(
-                isSystemActive: caffeine.isSystemActive,
-                isDisplayActive: caffeine.isDisplayActive,
-                activeMode: caffeine.activeMode,
-                activationStartTime: caffeine.activationStartTime,
-                activeUntil: caffeine.activeUntil
-            ))
-            .help(menuBarHelpText(
-                system: caffeine.isSystemActive,
-                display: caffeine.isDisplayActive,
-                activeUntil: caffeine.activeUntil
-            ))
+            menuBarIcon()
         }
-        .menuBarExtraStyle(.window)
+    }
 
-        Window("菜单栏管理", id: menuBarManagerSettingsWindowID) {
-            MenuBarManagerSettingsView(viewModel: menuBarManager)
-        }
+    private func menuBarIcon() -> some View {
+        Image(nsImage: MenuBarIcon.makeImage(
+            isSystemActive: caffeine.isSystemActive,
+            isDisplayActive: caffeine.isDisplayActive,
+            activeMode: caffeine.activeMode,
+            activationStartTime: caffeine.activationStartTime,
+            activeUntil: caffeine.activeUntil
+        ))
+        .help(menuBarHelpText(
+            system: caffeine.isSystemActive,
+            display: caffeine.isDisplayActive,
+            activeUntil: caffeine.activeUntil
+        ))
     }
 }
